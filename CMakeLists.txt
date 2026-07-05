@@ -41,14 +41,28 @@ option(STATIC    "compile statically"           OFF)
 option(FORCELE   "force little endian architecture"   OFF)
 option(USE_SYSTEM_LIBUEMF "use system libuemf library instead of vendored" OFF)
 
-if(STATIC)
+if(EMSCRIPTEN)
+    # Emscripten does not need a native shared object for the wasm module path.
+    set(SHARED "STATIC")
+    set(BUILD_SHARED_LIBRARIES OFF)
+elseif(STATIC)
     set(SHARED "SHARED")
     set(CMAKE_FIND_LIBRARY_SUFFIXES ".a")
     set(BUILD_SHARED_LIBRARIES OFF)
     set(CMAKE_EXE_LINKER_FLAGS "-static")
-else(STATIC)
+else()
     set(SHARED "SHARED")
-endif(STATIC)
+endif()
+
+if(EMSCRIPTEN)
+  set(ENABLE_GLYPH_INDEX_TEXT_DEFAULT OFF)
+else()
+  set(ENABLE_GLYPH_INDEX_TEXT_DEFAULT ON)
+endif()
+option(ENABLE_GLYPH_INDEX_TEXT
+  "enable fontconfig/freetype glyph-index text reverse mapping"
+  ${ENABLE_GLYPH_INDEX_TEXT_DEFAULT})
+option(BUILD_WASM_MODULE "build the Emscripten JavaScript/WebAssembly module" ${EMSCRIPTEN})
 
 if(GCOV)
   SET(UNITTEST ON)
@@ -61,9 +75,19 @@ if(UNITTEST)
 endif(UNITTEST)
 
 find_package(PNG REQUIRED)
-find_package(Freetype REQUIRED)
-find_package(Fontconfig REQUIRED)
-find_package(LibXml2 REQUIRED)
+if(ENABLE_GLYPH_INDEX_TEXT)
+  find_package(Freetype REQUIRED)
+  find_package(Fontconfig REQUIRED)
+else()
+  message(STATUS "Glyph-index text reverse mapping disabled; skipping Freetype and Fontconfig")
+endif()
+if(EMSCRIPTEN)
+  # The current sources do not include libxml2 headers; skipping it keeps the
+  # wasm dependency set minimal until a real source-level user appears.
+  message(STATUS "Skipping LibXml2 for Emscripten build")
+else()
+  find_package(LibXml2 REQUIRED)
+endif()
 
 set(DEPS ${CMAKE_CURRENT_SOURCE_DIR}/deps)
 set(EXTERNAL_INCLUDE_DIR ${DEPS}/include)
@@ -224,7 +248,7 @@ if(MSVC)
     ${EXTERNAL_INCLUDE_DIR}
   )
   if(USE_VENDORED_UEMF)
-    include_directories(${DEPS_UEMF})
+    include_directories(BEFORE ${DEPS_UEMF})
   else()
     include_directories(${UEMF_INCLUDE_DIRS})
   endif()
@@ -236,18 +260,29 @@ if(MSVC)
     ${EXTERNAL_LIB_DIR}
   )
 else(MSVC)
-  include_directories(
-    ./inc
-    ${PNG_INCLUDE_DIRS}
-    ${FREETYPE_INCLUDE_DIRS}
-    ${FONTCONFIG_INCLUDE_DIRS}
-    ${EXTERNAL_INCLUDE_DIR}
-    /usr/local/include
-    /usr/include
-    /sw/include
-  )
+  if(EMSCRIPTEN)
+    # Avoid host include paths during wasm cross-compilation.
+    include_directories(
+      ./inc
+      ${PNG_INCLUDE_DIRS}
+      ${FREETYPE_INCLUDE_DIRS}
+      ${FONTCONFIG_INCLUDE_DIRS}
+      ${EXTERNAL_INCLUDE_DIR}
+    )
+  else()
+    include_directories(
+      ./inc
+      ${PNG_INCLUDE_DIRS}
+      ${FREETYPE_INCLUDE_DIRS}
+      ${FONTCONFIG_INCLUDE_DIRS}
+      ${EXTERNAL_INCLUDE_DIR}
+      /usr/local/include
+      /usr/include
+      /sw/include
+    )
+  endif()
   if(USE_VENDORED_UEMF)
-    include_directories(${DEPS_UEMF})
+    include_directories(BEFORE ${DEPS_UEMF})
   else()
     include_directories(${UEMF_INCLUDE_DIRS})
   endif()
@@ -294,6 +329,10 @@ add_library(emf2svg
   src/lib/emf2svg.c
 )
 
+if(ENABLE_GLYPH_INDEX_TEXT)
+  target_compile_definitions(emf2svg PRIVATE ENABLE_GLYPH_INDEX_TEXT)
+endif()
+
 set_target_properties(emf2svg
   PROPERTIES
   VERSION ${emf2svg_VERSION}
@@ -317,6 +356,30 @@ endif()
 
 if(FMEM_NAME)
   add_dependencies(emf2svg ${FMEM_NAME})
+endif()
+
+if(EMSCRIPTEN AND BUILD_WASM_MODULE)
+  add_executable(emf2svg_wasm src/wasm/emf2svg_wasm.c)
+  set_target_properties(emf2svg_wasm
+    PROPERTIES
+    OUTPUT_NAME "emf2svg"
+    SUFFIX ".js"
+  )
+  target_link_libraries(emf2svg_wasm
+    emf2svg
+    ${PNG_LIBRARIES}
+    ${ZLIB_LIBRARIES}
+    ${EXTERNAL_ICONV}
+  )
+  target_link_options(emf2svg_wasm PRIVATE
+    "--no-entry"
+    "-sALLOW_MEMORY_GROWTH=1"
+    "-sENVIRONMENT=web,node"
+    "-sEXPORT_NAME=createEmf2SvgModule"
+    "-sEXPORTED_FUNCTIONS=['_malloc','_free','_emf2svg_wasm_convert']"
+    "-sEXPORTED_RUNTIME_METHODS=['ccall','cwrap','getValue','setValue','UTF8ToString','HEAPU8']"
+    "-sMODULARIZE=1"
+  )
 endif()
 
 if(NOT LONLY)

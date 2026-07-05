@@ -13,9 +13,11 @@ extern "C" {
 #include <string.h>
 #include <iconv.h>
 #include <errno.h>
+#ifdef ENABLE_GLYPH_INDEX_TEXT
 #include <ft2build.h>
 #include <fontconfig/fontconfig.h>
 #include FT_FREETYPE_H
+#endif
 
 void U_EMRNOTIMPLEMENTED_draw(const char *name, const char *contents, FILE *out,
                               drawingStates *states) {
@@ -1035,6 +1037,7 @@ void text_style_draw(FILE *out, drawingStates *states, POINT_D Org) {
     fprintf(out, "font-size=\"%.4f\" ", font_height);
 }
 
+#ifdef ENABLE_GLYPH_INDEX_TEXT
 // get the closest ttf file matching font_family, weight, italic
 static int get_fontpath(char *font_family, int weight, int italic,
                         char **path) {
@@ -1303,6 +1306,25 @@ static int fontindex_to_utf8(uint16_t *in, size_t size_in, char **out,
     *out = buf;
     return 0;
 }
+#else
+/*
+ * FONTINDEX text needs fontconfig's system font database and freetype glyph
+ * maps. Wasm builds disable that host-specific path and let callers use the
+ * existing failed-conversion fallback for this rare EMF text encoding.
+ */
+static int fontindex_to_utf8(uint16_t *in, size_t size_in, char **out,
+                             size_t *out_len, char *font_name, int weight,
+                             bool italic) {
+    UNUSED(in);
+    UNUSED(size_in);
+    UNUSED(font_name);
+    UNUSED(weight);
+    UNUSED(italic);
+    *out = NULL;
+    *out_len = 0;
+    return 1;
+}
+#endif
 
 static int enc_to_utf8(char *in, size_t size_in, char **out, size_t *out_len,
                        char *from_enc) {
