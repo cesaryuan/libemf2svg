@@ -22,6 +22,7 @@ extern "C" {
 #define WMF2EMF_INITIAL_SIZE 65536U
 #define WMF2EMF_CHUNK_SIZE 32768U
 #define WMF2EMF_HANDLE_LIMIT 65536U
+#define WMF2EMF_RESERVED_HANDLE UINT32_MAX
 
 typedef struct {
     uint32_t values[WMF2EMF_HANDLE_LIMIT];
@@ -382,14 +383,39 @@ static int wmf2emf_handle_create(wmf2emfHandleMap *map, uint32_t emf_handle) {
     return 0;
 }
 
+/* Reserve a WMF object slot for unsupported records that still allocate handles. */
+static int wmf2emf_handle_reserve(wmf2emfHandleMap *map) {
+    uint32_t i;
+
+    if (map == NULL) {
+        return 0;
+    }
+    for (i = 0; i < WMF2EMF_HANDLE_LIMIT; i++) {
+        if (!map->used[i]) {
+            map->used[i] = 1;
+            map->values[i] = WMF2EMF_RESERVED_HANDLE;
+            return 1;
+        }
+    }
+    return 0;
+}
+
 /* Resolve a WMF object handle to the EMF handle emitted for that object. */
 static int wmf2emf_handle_lookup(wmf2emfHandleMap *map, uint16_t wmf_handle,
                                  uint32_t *emf_handle) {
-    if (map == NULL || emf_handle == NULL || !map->used[wmf_handle]) {
+    if (map == NULL || emf_handle == NULL || !map->used[wmf_handle] ||
+        map->values[wmf_handle] == WMF2EMF_RESERVED_HANDLE) {
         return 0;
     }
     *emf_handle = map->values[wmf_handle];
     return 1;
+}
+
+/* Return true for a reserved unsupported WMF object handle. */
+static bool wmf2emf_handle_is_reserved(wmf2emfHandleMap *map,
+                                       uint16_t wmf_handle) {
+    return map != NULL && map->used[wmf_handle] &&
+           map->values[wmf_handle] == WMF2EMF_RESERVED_HANDLE;
 }
 
 /* Drop a WMF handle mapping after translating DELETEOBJECT. */
@@ -398,6 +424,20 @@ static void wmf2emf_handle_delete(wmf2emfHandleMap *map, uint16_t wmf_handle) {
         map->used[wmf_handle] = 0;
         map->values[wmf_handle] = 0;
     }
+}
+
+/* Skip an unsupported object-creation record without shifting later handles. */
+static int wmf2emf_reserve_unsupported_object(wmf2emfHandleMap *map,
+                                              uint8_t type,
+                                              const char *record,
+                                              wmf2emfContext *ctx) {
+    if (ctx != NULL) {
+        ctx->unsupported++;
+        wmf2emf_log(ctx,
+                    "unsupported WMF object record %s (type=0x%02X, xb=0x%02X), reserved handle",
+                    U_wmr_names(type), type, U_WMRXB(record));
+    }
+    return wmf2emf_handle_reserve(map);
 }
 
 /* Append the EMF header using normalized device bounds for stable SVG output. */
@@ -1015,6 +1055,10 @@ static int wmf2emf_translate_record(wmf2emfOutput *output,
             return 0;
         }
         if (!wmf2emf_handle_lookup(map, object, &emf_handle)) {
+            if (wmf2emf_handle_is_reserved(map, object)) {
+                wmf2emf_handle_delete(map, object);
+                return 1;
+            }
             ctx->unsupported++;
             wmf2emf_log(ctx, "unmapped WMF object %u deleted, skipped", object);
             return 1;
@@ -1027,6 +1071,12 @@ static int wmf2emf_translate_record(wmf2emfOutput *output,
         return wmf2emf_create_brush(output, map, record);
     case U_WMR_CREATEFONTINDIRECT:
         return wmf2emf_create_font(output, map, record, ctx);
+    case U_WMR_CREATEPALETTE:
+    case U_WMR_CREATEPATTERNBRUSH:
+    case U_WMR_DIBCREATEPATTERNBRUSH:
+    case U_WMR_CREATEBITMAPINDIRECT:
+    case U_WMR_CREATEREGION:
+        return wmf2emf_reserve_unsupported_object(map, type, record, ctx);
     default:
         ctx->unsupported++;
         wmf2emf_log(ctx, "unsupported WMF record %s (type=0x%02X, xb=0x%02X), skipped",
