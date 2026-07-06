@@ -10,6 +10,7 @@ extern "C" {
 #include "internal-fmem.h"
 #include "uemf.h"
 #include "uwmf.h"
+#include <limits.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -37,6 +38,15 @@ typedef struct {
     EMFHANDLES *handles;
     fmem memory;
 } wmf2emfOutput;
+
+typedef struct {
+    bool has_window_ext;
+    bool has_viewport_ext;
+    bool has_viewport_org;
+    bool has_default_viewport_ext;
+    U_POINT16 window_ext;
+    U_SIZEL default_viewport_ext;
+} wmf2emfMetrics;
 
 /* Log converter diagnostics only when verbose output is requested. */
 static void wmf2emf_log(wmf2emfContext *ctx, const char *fmt, ...) {
@@ -78,6 +88,67 @@ static U_RECTL wmf2emf_rect(U_RECT16 rect) {
     return (U_RECTL){rect.left, rect.top, rect.right, rect.bottom};
 }
 
+/* Build a normalized rectangle from a WMF destination point and extent. */
+static U_RECTL wmf2emf_rect_from_dest_size(U_POINT16 dest, U_POINT16 size) {
+    int32_t left = dest.x;
+    int32_t top = dest.y;
+    int32_t right = (int32_t)dest.x + (int32_t)size.x;
+    int32_t bottom = (int32_t)dest.y + (int32_t)size.y;
+    U_RECTL rect;
+
+    rect.left = left < right ? left : right;
+    rect.right = left < right ? right : left;
+    rect.top = top < bottom ? top : bottom;
+    rect.bottom = top < bottom ? bottom : top;
+    return rect;
+}
+
+/* Return a positive logical span while preserving zero as an invalid size. */
+static int32_t wmf2emf_abs_span(int32_t first, int32_t second) {
+    int64_t span = (int64_t)second - (int64_t)first;
+
+    if (span < 0) {
+        span = -span;
+    }
+    if (span > INT32_MAX) {
+        return INT32_MAX;
+    }
+    return (int32_t)span;
+}
+
+/* Prefer a real span, but keep malformed or missing dimensions drawable. */
+static int32_t wmf2emf_span_or_default(int32_t span, int32_t fallback) {
+    return span > 0 ? span : fallback;
+}
+
+/* Convert an extent to a positive viewport extent for default WMF mapping. */
+static U_SIZEL wmf2emf_positive_size(U_POINT16 point) {
+    return sizel_set(wmf2emf_span_or_default(wmf2emf_abs_span(0, point.x), 1),
+                     wmf2emf_span_or_default(wmf2emf_abs_span(0, point.y), 1));
+}
+
+/* Derive the default viewport from placeable bounds when they exist. */
+static void wmf2emf_set_default_viewport(wmf2emfMetrics *metrics,
+                                         const U_WMRPLACEABLE *placeable) {
+    int32_t width;
+    int32_t height;
+
+    if (metrics == NULL) {
+        return;
+    }
+    if (placeable != NULL && placeable->Key == 0x9AC6CDD7) {
+        width = wmf2emf_span_or_default(
+            wmf2emf_abs_span(placeable->Dst.left, placeable->Dst.right), 1000);
+        height = wmf2emf_span_or_default(
+            wmf2emf_abs_span(placeable->Dst.top, placeable->Dst.bottom), 1000);
+        metrics->default_viewport_ext = sizel_set(width, height);
+        metrics->has_default_viewport_ext = true;
+    } else if (metrics->has_window_ext) {
+        metrics->default_viewport_ext = wmf2emf_positive_size(metrics->window_ext);
+        metrics->has_default_viewport_ext = true;
+    }
+}
+
 /* Build a conservative EMF bounds rectangle for point-based records. */
 static U_RECTL wmf2emf_bounds_from_points(const U_POINT16 *points,
                                           uint32_t count) {
@@ -117,6 +188,45 @@ static size_t wmf2emf_record_size(const char *record) {
     }
     memcpy(&words, record + offsetof(U_METARECORD, Size16_4), sizeof(words));
     return (size_t)words * 2;
+}
+
+/* Scan records for document-level metrics that must be known before EMFHEADER. */
+static int wmf2emf_scan_metrics(const char *records, size_t offset,
+                                size_t length, char *blimit,
+                                wmf2emfMetrics *metrics,
+                                wmf2emfContext *ctx) {
+    const char *record;
+    size_t rec_size;
+    U_POINT16 point;
+
+    if (records == NULL || blimit == NULL || metrics == NULL) {
+        return 0;
+    }
+    memset(metrics, 0, sizeof(*metrics));
+    while (offset < length) {
+        record = records + offset;
+        rec_size = U_WMRRECSAFE_get(record, blimit);
+        if (rec_size == 0) {
+            wmf2emf_log(ctx, "invalid WMF record while scanning at offset %zu", offset);
+            return 0;
+        }
+        if (U_WMRTYPE(record) == U_WMR_SETWINDOWEXT &&
+            U_WMRSETWINDOWEXT_get(record, &point)) {
+            metrics->has_window_ext = true;
+            metrics->window_ext = point;
+        }
+        if (U_WMRTYPE(record) == U_WMR_SETVIEWPORTEXT) {
+            metrics->has_viewport_ext = true;
+        }
+        if (U_WMRTYPE(record) == U_WMR_SETVIEWPORTORG) {
+            metrics->has_viewport_org = true;
+        }
+        if (U_WMRTYPE(record) == U_WMR_EOF) {
+            break;
+        }
+        offset += rec_size;
+    }
+    return 1;
 }
 
 /* Keep only flags that are valid for EMR_EXTTEXTOUTA text records. */
@@ -255,22 +365,34 @@ static void wmf2emf_handle_delete(wmf2emfHandleMap *map, uint16_t wmf_handle) {
     }
 }
 
-/* Append the EMF header using a placeable WMF header when available. */
+/* Append the EMF header using normalized device bounds for stable SVG output. */
 static int wmf2emf_append_header(wmf2emfOutput *output,
-                                 const U_WMRPLACEABLE *placeable) {
+                                 const U_WMRPLACEABLE *placeable,
+                                 const wmf2emfMetrics *metrics) {
     U_RECTL bounds;
     U_RECTL frame;
     U_SIZEL device;
     U_SIZEL millimeters;
     uint16_t inch;
+    int32_t width;
+    int32_t height;
 
     if (placeable != NULL && placeable->Key == 0x9AC6CDD7) {
         inch = placeable->Inch == 0 ? 1440 : placeable->Inch;
-        bounds = wmf2emf_rect(placeable->Dst);
+        width = wmf2emf_span_or_default(
+            wmf2emf_abs_span(placeable->Dst.left, placeable->Dst.right), 1000);
+        height = wmf2emf_span_or_default(
+            wmf2emf_abs_span(placeable->Dst.top, placeable->Dst.bottom), 1000);
+        bounds = (U_RECTL){0, 0, width, height};
         frame.left = 0;
         frame.top = 0;
-        frame.right = (int32_t)(((int64_t)(placeable->Dst.right - placeable->Dst.left) * 2540) / inch);
-        frame.bottom = (int32_t)(((int64_t)(placeable->Dst.bottom - placeable->Dst.top) * 2540) / inch);
+        frame.right = (int32_t)(((int64_t)width * 2540) / inch);
+        frame.bottom = (int32_t)(((int64_t)height * 2540) / inch);
+    } else if (metrics != NULL && metrics->has_window_ext) {
+        width = wmf2emf_span_or_default(wmf2emf_abs_span(0, metrics->window_ext.x), 1000);
+        height = wmf2emf_span_or_default(wmf2emf_abs_span(0, metrics->window_ext.y), 1000);
+        bounds = (U_RECTL){0, 0, width, height};
+        frame = (U_RECTL){0, 0, width * 2540 / 1000, height * 2540 / 1000};
     } else {
         bounds = (U_RECTL){0, 0, 1000, 1000};
         frame = (U_RECTL){0, 0, 2540, 2540};
@@ -282,6 +404,59 @@ static int wmf2emf_append_header(wmf2emfOutput *output,
     return wmf2emf_append_record(
         output, U_EMRHEADER_set(bounds, frame, NULL, 0, NULL, device,
                                 millimeters, 0));
+}
+
+/* Enable window/viewport mapping for placeable-style WMF logical extents. */
+static int wmf2emf_append_initial_mapping(wmf2emfOutput *output,
+                                          const wmf2emfMetrics *metrics) {
+    if (metrics == NULL || !metrics->has_window_ext) {
+        return 1;
+    }
+    return wmf2emf_append_record(output, U_EMRSETMAPMODE_set(U_MM_ANISOTROPIC));
+}
+
+/* Read an unaligned signed 16-bit field from a WMF font object. */
+static int16_t wmf2emf_font_i16(const char *font, size_t offset) {
+    int16_t value = 0;
+
+    memcpy(&value, font + offset, sizeof(value));
+    return value;
+}
+
+/* Read an unaligned byte field from a WMF font object. */
+static uint8_t wmf2emf_font_u8(const char *font, size_t offset) {
+    return (uint8_t)*(const unsigned char *)(font + offset);
+}
+
+/* Copy the WMF ANSI face name into a small UTF-8-compatible buffer. */
+static char *wmf2emf_font_face_copy(const char *font) {
+    const char *face = font + offsetof(U_FONT, FaceName);
+    size_t max_len = 31;
+    size_t len = 0;
+    char *copy;
+
+    while (len < max_len && face[len] != '\0') {
+        len++;
+    }
+    if (len == 0) {
+        face = "Arial";
+        len = strlen(face);
+    }
+    copy = (char *)calloc(len + 1, sizeof(char));
+    if (copy != NULL) {
+        memcpy(copy, face, len);
+    }
+    return copy;
+}
+
+/* Convert a WMF ANSI face name to UTF-16LE, falling back when bytes are invalid. */
+static uint16_t *wmf2emf_font_face_utf16(const char *face) {
+    uint16_t *wide = U_Utf8ToUtf16le(face, 0, NULL);
+
+    if (wide == NULL) {
+        wide = U_Utf8ToUtf16le("Arial", 0, NULL);
+    }
+    return wide;
 }
 
 /* Convert a WMF pen record into an EMF pen record and remember its handle. */
@@ -324,6 +499,108 @@ static int wmf2emf_create_brush(wmf2emfOutput *output, wmf2emfHandleMap *map,
     }
     return wmf2emf_append_record(
         output, U_EMRCREATEBRUSHINDIRECT_set(emf_handle, logbrush));
+}
+
+/* Convert a WMF font object so text records select a nonzero EMF font. */
+static int wmf2emf_create_font(wmf2emfOutput *output, wmf2emfHandleMap *map,
+                               const char *record, wmf2emfContext *ctx) {
+    const char *font_data = NULL;
+    char *face = NULL;
+    uint16_t *face_wide = NULL;
+    U_LOGFONT logfont;
+    uint32_t emf_handle = 0;
+    char *emf_record;
+
+    if (!U_WMRCREATEFONTINDIRECT_get(record, &font_data) || font_data == NULL) {
+        return 0;
+    }
+    face = wmf2emf_font_face_copy(font_data);
+    if (face == NULL) {
+        return 0;
+    }
+    face_wide = wmf2emf_font_face_utf16(face);
+    if (face_wide == NULL) {
+        wmf2emf_log(ctx, "failed to convert WMF font face '%s'", face);
+        free(face);
+        return 0;
+    }
+    logfont = logfont_set(
+        wmf2emf_font_i16(font_data, offsetof(U_FONT, Height)),
+        wmf2emf_font_i16(font_data, offsetof(U_FONT, Width)),
+        wmf2emf_font_i16(font_data, offsetof(U_FONT, Escapement)),
+        wmf2emf_font_i16(font_data, offsetof(U_FONT, Orientation)),
+        wmf2emf_font_i16(font_data, offsetof(U_FONT, Weight)),
+        wmf2emf_font_u8(font_data, offsetof(U_FONT, Italic)),
+        wmf2emf_font_u8(font_data, offsetof(U_FONT, Underline)),
+        wmf2emf_font_u8(font_data, offsetof(U_FONT, StrikeOut)),
+        wmf2emf_font_u8(font_data, offsetof(U_FONT, CharSet)),
+        wmf2emf_font_u8(font_data, offsetof(U_FONT, OutPrecision)),
+        wmf2emf_font_u8(font_data, offsetof(U_FONT, ClipPrecision)),
+        wmf2emf_font_u8(font_data, offsetof(U_FONT, Quality)),
+        wmf2emf_font_u8(font_data, offsetof(U_FONT, PitchAndFamily)),
+        face_wide);
+    free(face);
+    free(face_wide);
+    if (emf_htable_insert(&emf_handle, output->handles) != 0 ||
+        !wmf2emf_handle_create(map, emf_handle)) {
+        return 0;
+    }
+    emf_record = U_EMREXTCREATEFONTINDIRECTW_set(emf_handle,
+                                                 (const char *)&logfont, NULL);
+    return wmf2emf_append_record(output, emf_record);
+}
+
+/* Convert packed WMF DIB blit records to EMF STRETCHDIBITS image records. */
+static int wmf2emf_append_stretch_dibits(wmf2emfOutput *output,
+                                         const char *record,
+                                         U_POINT16 dst, U_POINT16 dst_size,
+                                         U_POINT16 src, U_POINT16 src_size,
+                                         uint32_t usage, uint32_t rop,
+                                         const char *dib,
+                                         wmf2emfContext *ctx) {
+    const char *px = NULL;
+    const U_RGBQUAD *ct = NULL;
+    uint32_t num_ct = 0;
+    int32_t width = 0;
+    int32_t height = 0;
+    int32_t color_type = 0;
+    int32_t invert = 0;
+    uint32_t dib_header_size = 0;
+    size_t record_size;
+    size_t px_offset;
+    uint32_t cb_px;
+
+    if (record == NULL || dib == NULL) {
+        wmf2emf_log(ctx, "DIB blit without embedded bitmap skipped");
+        return 1;
+    }
+    memcpy(&dib_header_size, dib, sizeof(dib_header_size));
+    if (dib_header_size != U_SIZE_BITMAPINFOHEADER) {
+        // EMF STRETCHDIBITS and the downstream SVG writer expect BITMAPINFOHEADER.
+        wmf2emf_log(ctx, "unsupported DIB header size %u skipped", dib_header_size);
+        return 1;
+    }
+    (void)wget_DIB_params(dib, &px, &ct, &num_ct, &width, &height, &color_type, &invert);
+    (void)ct;
+    (void)num_ct;
+    (void)width;
+    (void)height;
+    (void)color_type;
+    (void)invert;
+    record_size = wmf2emf_record_size(record);
+    if (px == NULL || px < record || (size_t)(px - record) >= record_size) {
+        wmf2emf_log(ctx, "invalid DIB pixel payload skipped");
+        return 1;
+    }
+    px_offset = (size_t)(px - record);
+    cb_px = (uint32_t)(record_size - px_offset);
+    return wmf2emf_append_record(
+        output,
+        U_EMRSTRETCHDIBITS_set(
+            wmf2emf_rect_from_dest_size(dst, dst_size),
+            wmf2emf_point(dst), wmf2emf_point(dst_size),
+            wmf2emf_point(src), wmf2emf_point(src_size),
+            usage, rop, (PU_BITMAPINFO)dib, cb_px, (char *)px));
 }
 
 /* Convert WMF polygon point storage to the 32-bit EMF point storage. */
@@ -435,6 +712,7 @@ static const int16_t *wmf2emf_exttext_dx_if_present(const char *record,
 static int wmf2emf_translate_record(wmf2emfOutput *output,
                                     wmf2emfHandleMap *map,
                                     const char *record,
+                                    const wmf2emfMetrics *metrics,
                                     wmf2emfContext *ctx,
                                     bool *stop) {
     uint8_t type;
@@ -444,9 +722,13 @@ static int wmf2emf_translate_record(wmf2emfOutput *output,
     U_COLORREF color;
     U_POINT16 point;
     U_POINT16 point2;
+    U_POINT16 src;
+    U_POINT16 src_size;
     U_RECT16 rect;
     uint16_t count16;
+    uint32_t rop;
     const char *data = NULL;
+    const char *dib = NULL;
     const int16_t *dx = NULL;
     U_POINTL *points = NULL;
     uint32_t emf_handle = 0;
@@ -487,8 +769,26 @@ static int wmf2emf_translate_record(wmf2emfOutput *output,
         return U_WMRSETWINDOWORG_get(record, &point) &&
                wmf2emf_append_record(output, U_EMRSETWINDOWORGEX_set(wmf2emf_point(point)));
     case U_WMR_SETWINDOWEXT:
-        return U_WMRSETWINDOWEXT_get(record, &point) &&
-               wmf2emf_append_record(output, U_EMRSETWINDOWEXTEX_set(wmf2emf_size(point)));
+        if (!U_WMRSETWINDOWEXT_get(record, &point) ||
+            !wmf2emf_append_record(output, U_EMRSETWINDOWEXTEX_set(wmf2emf_size(point)))) {
+            return 0;
+        }
+        // WMF files often rely on the default viewport.  Writing it explicitly
+        // lets EMF readers apply negative window extents instead of clipping.
+        if (metrics != NULL && !metrics->has_viewport_org &&
+            !wmf2emf_append_record(output, U_EMRSETVIEWPORTORGEX_set(pointl_set(0, 0)))) {
+            return 0;
+        }
+        if (metrics != NULL && !metrics->has_viewport_ext &&
+            !wmf2emf_append_record(
+                output,
+                U_EMRSETVIEWPORTEXTEX_set(
+                    metrics->has_default_viewport_ext
+                        ? metrics->default_viewport_ext
+                        : wmf2emf_positive_size(point)))) {
+            return 0;
+        }
+        return 1;
     case U_WMR_SETVIEWPORTORG:
         return U_WMRSETVIEWPORTORG_get(record, &point) &&
                wmf2emf_append_record(output, U_EMRSETVIEWPORTORGEX_set(wmf2emf_point(point)));
@@ -629,6 +929,31 @@ static int wmf2emf_translate_record(wmf2emfOutput *output,
     case U_WMR_EXTFLOODFILL:
         return U_WMREXTFLOODFILL_get(record, &mode, &color, &point) &&
                wmf2emf_append_record(output, U_EMREXTFLOODFILL_set(wmf2emf_point(point), color, mode));
+    case U_WMR_DIBBITBLT:
+        if (!U_WMRDIBBITBLT_get(record, &point, &point2, &src, &rop, &dib)) {
+            return 0;
+        }
+        return wmf2emf_append_stretch_dibits(output, record, point, point2,
+                                             src, point2,
+                                             U_DIB_RGB_COLORS, rop, dib, ctx);
+    case U_WMR_DIBSTRETCHBLT:
+        if (!U_WMRDIBSTRETCHBLT_get(record, &point, &point2,
+                                    &src, &src_size,
+                                    &rop, &dib)) {
+            return 0;
+        }
+        return wmf2emf_append_stretch_dibits(output, record, point, point2,
+                                             src, src_size,
+                                             U_DIB_RGB_COLORS, rop, dib, ctx);
+    case U_WMR_STRETCHDIB:
+        if (!U_WMRSTRETCHDIB_get(record, &point, &point2,
+                                 &src, &src_size,
+                                 &mode, &rop, &dib)) {
+            return 0;
+        }
+        return wmf2emf_append_stretch_dibits(output, record, point, point2,
+                                             src, src_size,
+                                             mode, rop, dib, ctx);
     case U_WMR_DELETEOBJECT:
         if (!U_WMRDELETEOBJECT_get(record, &object)) {
             return 0;
@@ -644,6 +969,8 @@ static int wmf2emf_translate_record(wmf2emfOutput *output,
         return wmf2emf_create_pen(output, map, record);
     case U_WMR_CREATEBRUSHINDIRECT:
         return wmf2emf_create_brush(output, map, record);
+    case U_WMR_CREATEFONTINDIRECT:
+        return wmf2emf_create_font(output, map, record, ctx);
     default:
         ctx->unsupported++;
         wmf2emf_log(ctx, "unsupported WMF record %s (type=0x%02X, xb=0x%02X), skipped",
@@ -661,6 +988,7 @@ int wmf2emf(char *contents, size_t length, char **out, size_t *out_length,
     wmf2emfHandleMap handle_map;
     U_WMRPLACEABLE placeable;
     U_WMRHEADER header;
+    wmf2emfMetrics metrics;
     char *work = NULL;
     char *blimit;
     size_t off;
@@ -687,13 +1015,21 @@ int wmf2emf(char *contents, size_t length, char **out, size_t *out_length,
         wmf2emf_log(&ctx, "invalid WMF header");
         goto done;
     }
+    if (!wmf2emf_scan_metrics(work, off, length, blimit, &metrics, &ctx)) {
+        goto done;
+    }
+    wmf2emf_set_default_viewport(&metrics, &placeable);
     if (!wmf2emf_output_init(&output)) {
         wmf2emf_log(&ctx, "failed to allocate EMF output stream");
         goto done;
     }
     memset(&handle_map, 0, sizeof(handle_map));
-    if (!wmf2emf_append_header(&output, &placeable)) {
+    if (!wmf2emf_append_header(&output, &placeable, &metrics)) {
         wmf2emf_log(&ctx, "failed to append EMF header");
+        goto done_output;
+    }
+    if (!wmf2emf_append_initial_mapping(&output, &metrics)) {
+        wmf2emf_log(&ctx, "failed to append initial EMF mapping");
         goto done_output;
     }
     while (off < length && !stop) {
@@ -702,8 +1038,8 @@ int wmf2emf(char *contents, size_t length, char **out, size_t *out_length,
             wmf2emf_log(&ctx, "invalid WMF record at offset %zu", off);
             goto done_output;
         }
-        if (!wmf2emf_translate_record(&output, &handle_map, work + off, &ctx,
-                                      &stop)) {
+        if (!wmf2emf_translate_record(&output, &handle_map, work + off, &metrics,
+                                      &ctx, &stop)) {
             wmf2emf_log(&ctx, "failed to translate WMF record at offset %zu", off);
             goto done_output;
         }
