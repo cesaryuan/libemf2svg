@@ -1091,7 +1091,7 @@ int wmf2emf(char *contents, size_t length, char **out, size_t *out_length,
     wmf2emfOptions opts = wmf2emf_options_or_default(options);
     wmf2emfContext ctx = {opts.verbose, 0};
     wmf2emfOutput output;
-    wmf2emfHandleMap handle_map;
+    wmf2emfHandleMap *handle_map = NULL;
     wmf2emfState state;
     U_WMRPLACEABLE placeable;
     U_WMRHEADER header;
@@ -1126,11 +1126,19 @@ int wmf2emf(char *contents, size_t length, char **out, size_t *out_length,
         goto done;
     }
     wmf2emf_set_default_viewport(&metrics, &placeable);
+    /*
+     * The WMF handle table is large enough to overflow Emscripten's default
+     * stack, so keep it on the heap for wasm and native builds alike.
+     */
+    handle_map = (wmf2emfHandleMap *)calloc(1, sizeof(*handle_map));
+    if (handle_map == NULL) {
+        wmf2emf_log(&ctx, "failed to allocate WMF handle map");
+        goto done;
+    }
     if (!wmf2emf_output_init(&output)) {
         wmf2emf_log(&ctx, "failed to allocate EMF output stream");
         goto done;
     }
-    memset(&handle_map, 0, sizeof(handle_map));
     wmf2emf_state_init(&state);
     if (!wmf2emf_append_header(&output, &placeable, &metrics)) {
         wmf2emf_log(&ctx, "failed to append EMF header");
@@ -1146,7 +1154,7 @@ int wmf2emf(char *contents, size_t length, char **out, size_t *out_length,
             wmf2emf_log(&ctx, "invalid WMF record at offset %zu", off);
             goto done_output;
         }
-        if (!wmf2emf_translate_record(&output, &handle_map, &state, work + off,
+        if (!wmf2emf_translate_record(&output, handle_map, &state, work + off,
                                       &metrics, &ctx, &stop)) {
             wmf2emf_log(&ctx, "failed to translate WMF record at offset %zu", off);
             goto done_output;
@@ -1166,6 +1174,7 @@ int wmf2emf(char *contents, size_t length, char **out, size_t *out_length,
 done_output:
     wmf2emf_output_free(&output);
 done:
+    free(handle_map);
     free(work);
     if (!ok) {
         free(*out);

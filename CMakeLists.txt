@@ -380,7 +380,7 @@ if(EMSCRIPTEN AND BUILD_WASM_MODULE)
     "-sALLOW_MEMORY_GROWTH=1"
     "-sENVIRONMENT=web,node"
     "-sEXPORT_NAME=createEmf2SvgModule"
-    "-sEXPORTED_FUNCTIONS=['_malloc','_free','_emf2svg_wasm_convert']"
+    "-sEXPORTED_FUNCTIONS=['_malloc','_free','_emf2svg_wasm_convert','_wmf2svg_wasm_convert']"
     "-sEXPORTED_RUNTIME_METHODS=['ccall','cwrap','getValue','setValue','UTF8ToString','HEAPU8']"
     "-sMODULARIZE=1"
   )
