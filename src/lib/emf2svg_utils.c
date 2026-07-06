@@ -1578,6 +1578,12 @@ static int encoded_font_to_utf8(char *in, size_t size_in, char **out,
     return 0;
 }
 
+/* Convert ANSI_CHARSET ExtTextOutA bytes as Windows-1252, fixing hat accents. */
+static int ansi_text_to_utf8(char *in, size_t size_in, char **out,
+                             size_t *out_len) {
+    return enc_to_utf8(in, size_in, out, out_len, "CP1252");
+}
+
 /* Draw per-character tspans when EMF supplies explicit Dx advances. */
 static void text_positioned_chars_draw(char *contents, FILE *out,
                                        drawingStates *states, uint8_t type,
@@ -1723,6 +1729,11 @@ void text_convert(char *in, size_t size_in, char **out, size_t *size_out,
         else if (is_euclid_math_one_text(states)) {
             ret = encoded_font_to_utf8(in, size_in, (char **)&string, size_out,
                                        euclid_math_one_codepoint);
+            type = UTF_16;
+        }
+        else if (states != NULL &&
+                 states->currentDeviceContext.font_charset == U_ANSI_CHARSET) {
+            ret = ansi_text_to_utf8(in, size_in, (char **)&string, size_out);
             type = UTF_16;
         }
         else {
