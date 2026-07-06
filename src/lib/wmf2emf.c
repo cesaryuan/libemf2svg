@@ -48,6 +48,12 @@ typedef struct {
     U_SIZEL default_viewport_ext;
 } wmf2emfMetrics;
 
+typedef struct {
+    bool has_current_point;
+    U_POINT16 current_point;
+    uint16_t text_align;
+} wmf2emfState;
+
 /* Log converter diagnostics only when verbose output is requested. */
 static void wmf2emf_log(wmf2emfContext *ctx, const char *fmt, ...) {
     va_list args;
@@ -236,10 +242,39 @@ static uint32_t wmf2emf_text_options(uint16_t options, bool has_dx) {
                      U_ETO_NUMERICSLOCAL | U_ETO_NUMERICSLATIN |
                      U_ETO_IGNORELANGUAGE | U_ETO_REVERSE_INDEX_MAP;
 
-    if (has_dx) {
-        valid |= U_ETO_PDY;
-    }
+    // WMF ExtTextOut Dx carries horizontal advances only.  Do not synthesize
+    // ETO_PDY here: EMF readers then expect x/y pairs and libuemf overreads.
+    (void)has_dx;
     return ((uint32_t)options & valid) | U_ETO_NO_RECT;
+}
+
+/* Reset per-record GDI state that affects records whose coordinates are implicit. */
+static void wmf2emf_state_init(wmf2emfState *state) {
+    if (state == NULL) {
+        return;
+    }
+    memset(state, 0, sizeof(*state));
+    state->text_align = U_TA_DEFAULT;
+}
+
+/* Remember the current point used by line drawing and TA_UPDATECP text output. */
+static void wmf2emf_state_set_current_point(wmf2emfState *state,
+                                            U_POINT16 point) {
+    if (state == NULL) {
+        return;
+    }
+    state->current_point = point;
+    state->has_current_point = true;
+}
+
+/* Fix Equation/MathType WMFs that put text at the MoveTo current point via TA_UPDATECP. */
+static U_POINT16 wmf2emf_text_reference_point(const wmf2emfState *state,
+                                             U_POINT16 record_point) {
+    if (state != NULL && state->has_current_point &&
+        (state->text_align & U_TA_UPDATECP) == U_TA_UPDATECP) {
+        return state->current_point;
+    }
+    return record_point;
 }
 
 /* Allocate a small EMF writer backed by fmem so the public API stays in memory. */
@@ -711,6 +746,7 @@ static const int16_t *wmf2emf_exttext_dx_if_present(const char *record,
 /* Translate one WMF record to one or more EMF records. */
 static int wmf2emf_translate_record(wmf2emfOutput *output,
                                     wmf2emfHandleMap *map,
+                                    wmf2emfState *state,
                                     const char *record,
                                     const wmf2emfMetrics *metrics,
                                     wmf2emfContext *ctx,
@@ -802,11 +838,19 @@ static int wmf2emf_translate_record(wmf2emfOutput *output,
         return U_WMRSCALEVIEWPORTEXT_get(record, &point, &point2) &&
                wmf2emf_append_record(output, U_EMRSCALEVIEWPORTEXTEX_set(point2.x, point.x, point2.y, point.y));
     case U_WMR_LINETO:
-        return U_WMRLINETO_get(record, &point) &&
-               wmf2emf_append_record(output, U_EMRLINETO_set(wmf2emf_point(point)));
+        if (!U_WMRLINETO_get(record, &point) ||
+            !wmf2emf_append_record(output, U_EMRLINETO_set(wmf2emf_point(point)))) {
+            return 0;
+        }
+        wmf2emf_state_set_current_point(state, point);
+        return 1;
     case U_WMR_MOVETO:
-        return U_WMRMOVETO_get(record, &point) &&
-               wmf2emf_append_record(output, U_EMRMOVETOEX_set(wmf2emf_point(point)));
+        if (!U_WMRMOVETO_get(record, &point) ||
+            !wmf2emf_append_record(output, U_EMRMOVETOEX_set(wmf2emf_point(point)))) {
+            return 0;
+        }
+        wmf2emf_state_set_current_point(state, point);
+        return 1;
     case U_WMR_EXCLUDECLIPRECT:
         return U_WMREXCLUDECLIPRECT_get(record, &rect) &&
                wmf2emf_append_record(output, U_EMREXCLUDECLIPRECT_set(wmf2emf_rect(rect)));
@@ -880,8 +924,14 @@ static int wmf2emf_translate_record(wmf2emfOutput *output,
         }
         return wmf2emf_append_record(output, U_EMRSELECTOBJECT_set(emf_handle));
     case U_WMR_SETTEXTALIGN:
-        return U_WMRSETTEXTALIGN_get(record, &mode) &&
-               wmf2emf_append_record(output, U_EMRSETTEXTALIGN_set(mode));
+        if (!U_WMRSETTEXTALIGN_get(record, &mode) ||
+            !wmf2emf_append_record(output, U_EMRSETTEXTALIGN_set(mode))) {
+            return 0;
+        }
+        if (state != NULL) {
+            state->text_align = mode;
+        }
+        return 1;
     case U_WMR_CHORD:
         return U_WMRCHORD_get(record, &point, &point2, &rect) &&
                wmf2emf_append_record(output, U_EMRCHORD_set(wmf2emf_rect(rect), wmf2emf_point(point), wmf2emf_point(point2)));
@@ -890,10 +940,14 @@ static int wmf2emf_translate_record(wmf2emfOutput *output,
             return 0;
         }
         dx = wmf2emf_exttext_dx_if_present(record, text_len, mode);
+        point = wmf2emf_text_reference_point(state, point);
         return wmf2emf_append_text(output, point, text_len, mode, data, dx, rect, ctx);
     case U_WMR_TEXTOUT:
-        return U_WMRTEXTOUT_get(record, &point, &text_len, &data) &&
-               wmf2emf_append_text(output, point, text_len, U_ETO_NONE, data, NULL, U_RCL16_DEF, ctx);
+        if (!U_WMRTEXTOUT_get(record, &point, &text_len, &data)) {
+            return 0;
+        }
+        point = wmf2emf_text_reference_point(state, point);
+        return wmf2emf_append_text(output, point, text_len, U_ETO_NONE, data, NULL, U_RCL16_DEF, ctx);
     case U_WMR_POLYPOLYGON:
         if (!U_WMRPOLYPOLYGON_get(record, &count16, (const uint16_t **)&dx, &data)) {
             return 0;
@@ -986,6 +1040,7 @@ int wmf2emf(char *contents, size_t length, char **out, size_t *out_length,
     wmf2emfContext ctx = {opts.verbose, 0};
     wmf2emfOutput output;
     wmf2emfHandleMap handle_map;
+    wmf2emfState state;
     U_WMRPLACEABLE placeable;
     U_WMRHEADER header;
     wmf2emfMetrics metrics;
@@ -1024,6 +1079,7 @@ int wmf2emf(char *contents, size_t length, char **out, size_t *out_length,
         goto done;
     }
     memset(&handle_map, 0, sizeof(handle_map));
+    wmf2emf_state_init(&state);
     if (!wmf2emf_append_header(&output, &placeable, &metrics)) {
         wmf2emf_log(&ctx, "failed to append EMF header");
         goto done_output;
@@ -1038,8 +1094,8 @@ int wmf2emf(char *contents, size_t length, char **out, size_t *out_length,
             wmf2emf_log(&ctx, "invalid WMF record at offset %zu", off);
             goto done_output;
         }
-        if (!wmf2emf_translate_record(&output, &handle_map, work + off, &metrics,
-                                      &ctx, &stop)) {
+        if (!wmf2emf_translate_record(&output, &handle_map, &state, work + off,
+                                      &metrics, &ctx, &stop)) {
             wmf2emf_log(&ctx, "failed to translate WMF record at offset %zu", off);
             goto done_output;
         }
