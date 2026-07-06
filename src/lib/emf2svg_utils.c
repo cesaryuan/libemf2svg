@@ -901,8 +901,12 @@ void stroke_draw(drawingStates *states, FILE *out, bool *filled,
     switch (states->currentDeviceContext.stroke_mode & 0x000F0000) {
     case U_PS_COSMETIC:
         color_stroke(states, out);
-        // width_stroke(states, out, 1 / states->scaling);
-        width_stroke(states, out, 1);
+        // WMF/EMF cosmetic pens can still carry a logical width.  Equation
+        // WMFs use that for fraction bars; width 0 remains a hairline.
+        width_stroke(states, out,
+                     states->currentDeviceContext.stroke_width > 0
+                         ? states->currentDeviceContext.stroke_width
+                         : 1);
         *stroked = true;
         break;
     case U_PS_GEOMETRIC:
@@ -972,9 +976,10 @@ void stroke_draw(drawingStates *states, FILE *out, bool *filled,
 void text_style_draw(FILE *out, drawingStates *states, POINT_D Org) {
     double font_height =
         fabs(scaleX(states, states->currentDeviceContext.font_height));
-    if (states->currentDeviceContext.font_family != NULL)
+    if (states->currentDeviceContext.font_family != NULL) {
         fprintf(out, "font-family=\"%s\" ",
                 states->currentDeviceContext.font_family);
+    }
     fprintf(out, "fill=\"#%02X%02X%02X\" ",
             states->currentDeviceContext.text_red,
             states->currentDeviceContext.text_green,
@@ -1037,6 +1042,59 @@ void text_style_draw(FILE *out, drawingStates *states, POINT_D Org) {
                 Org.y + font_height * 0.9);
     }
     fprintf(out, "font-size=\"%.4f\" ", font_height);
+}
+
+/* Build absolute SVG x positions from EMR text Dx advances. */
+static double *text_dx_positions(drawingStates *states, const char *contents,
+                                 const U_EMRTEXT *pemt, double origin_x) {
+    uint32_t off = sizeof(U_EMRTEXT);
+    uint32_t off_dx = 0;
+    int64_t logical_x = 0;
+    double *positions;
+    uint32_t step;
+    uint32_t i;
+
+    if (states == NULL || contents == NULL || pemt == NULL || pemt->nChars < 2) {
+        return NULL;
+    }
+    if (!(pemt->fOptions & U_ETO_NO_RECT)) {
+        off += sizeof(U_RECTL);
+    }
+    if (checkOutOfEMF(states, (uintptr_t)((const char *)pemt + off + sizeof(off_dx)))) {
+        return NULL;
+    }
+    memcpy(&off_dx, (const char *)pemt + off, sizeof(off_dx));
+    step = (pemt->fOptions & U_ETO_PDY) ? 2 : 1;
+    if (off_dx == 0 ||
+        checkOutOfEMF(states, (uintptr_t)(contents + off_dx + pemt->nChars * step * sizeof(uint32_t)))) {
+        return NULL;
+    }
+    for (i = 0; i < pemt->nChars; i++) {
+        int32_t dx = 0;
+        memcpy(&dx, contents + off_dx + i * step * sizeof(uint32_t),
+               sizeof(dx));
+        if (dx != 0) {
+            break;
+        }
+    }
+    if (i == pemt->nChars) {
+        // WMF records without Dx arrive here as all-zero advances from
+        // wmf2emf; treat that as no explicit per-character positioning.
+        return NULL;
+    }
+    positions = (double *)calloc(pemt->nChars, sizeof(double));
+    if (positions == NULL) {
+        return NULL;
+    }
+    positions[0] = origin_x;
+    for (i = 1; i < pemt->nChars; i++) {
+        int32_t dx = 0;
+        memcpy(&dx, contents + off_dx + (i - 1) * step * sizeof(uint32_t),
+               sizeof(dx));
+        logical_x += dx;
+        positions[i] = origin_x + scaleX(states, (double)logical_x);
+    }
+    return positions;
 }
 
 #ifdef ENABLE_GLYPH_INDEX_TEXT
@@ -1403,6 +1461,175 @@ static int enc_to_utf8(char *in, size_t size_in, char **out, size_t *out_len,
     return 0;
 }
 
+/* Append one Unicode code point encoded as UTF-8. */
+static int utf8_append_codepoint(char *out, size_t capacity, size_t *offset,
+                                 uint32_t codepoint) {
+    if (codepoint <= 0x7F) {
+        if (*offset + 1 >= capacity) {
+            return 0;
+        }
+        out[(*offset)++] = (char)codepoint;
+    } else if (codepoint <= 0x7FF) {
+        if (*offset + 2 >= capacity) {
+            return 0;
+        }
+        out[(*offset)++] = (char)(0xC0 | (codepoint >> 6));
+        out[(*offset)++] = (char)(0x80 | (codepoint & 0x3F));
+    } else if (codepoint <= 0xFFFF) {
+        if (*offset + 3 >= capacity) {
+            return 0;
+        }
+        out[(*offset)++] = (char)(0xE0 | (codepoint >> 12));
+        out[(*offset)++] = (char)(0x80 | ((codepoint >> 6) & 0x3F));
+        out[(*offset)++] = (char)(0x80 | (codepoint & 0x3F));
+    } else if (codepoint <= 0x10FFFF) {
+        if (*offset + 4 >= capacity) {
+            return 0;
+        }
+        out[(*offset)++] = (char)(0xF0 | (codepoint >> 18));
+        out[(*offset)++] = (char)(0x80 | ((codepoint >> 12) & 0x3F));
+        out[(*offset)++] = (char)(0x80 | ((codepoint >> 6) & 0x3F));
+        out[(*offset)++] = (char)(0x80 | (codepoint & 0x3F));
+    } else {
+        return 0;
+    }
+    return 1;
+}
+
+/* Map Symbol bytes to Windows Symbol PUA code points for faithful rendering. */
+static uint32_t symbol_codepoint(unsigned char code) {
+    if ((code >= 0x20 && code <= 0x7E) ||
+        (code >= 0xA1 && code <= 0xEF) ||
+        (code >= 0xF1 && code <= 0xFE)) {
+        return 0xF000U + code;
+    }
+    return code;
+}
+
+/* Map MT Extra bytes to its MathType PUA cmap, fixing blackboard glyph loss. */
+static uint32_t mt_extra_codepoint(unsigned char code) {
+    if (code >= 0x20 && code != 0x7F) {
+        return 0xF000U + code;
+    }
+    return code;
+}
+
+/* Map Euclid Math Two bytes to its MathType PUA cmap for large operators. */
+static uint32_t euclid_math_two_codepoint(unsigned char code) {
+    if ((code >= 0x20 && code <= 0x2C) ||
+        (code >= 0x41 && code <= 0x5A) ||
+        code == 0x6B ||
+        (code >= 0x80 && code <= 0xAB) ||
+        (code >= 0xB0 && code <= 0xCB) ||
+        (code >= 0xD0 && code <= 0xE5) ||
+        (code >= 0xF0 && code <= 0xF5)) {
+        return 0xF000U + code;
+    }
+    return code;
+}
+
+/* Map Euclid Math One bytes to its MathType PUA cmap, fixing glyph-code loss. */
+static uint32_t euclid_math_one_codepoint(unsigned char code) {
+    if ((code >= 0x20 && code <= 0x2D) ||
+        (code >= 0x30 && code <= 0x39) ||
+        (code >= 0x41 && code <= 0x5A) ||
+        (code >= 0x80 && code <= 0x8D) ||
+        (code >= 0x90 && code <= 0x99) ||
+        (code >= 0xA0 && code <= 0xAE) ||
+        (code >= 0xB0 && code <= 0xD3) ||
+        (code >= 0xE0 && code <= 0xEA) ||
+        (code >= 0xF0 && code <= 0xFF)) {
+        return 0xF000U + code;
+    }
+    return code;
+}
+
+/* Return true for Symbol-font text whose bytes need Symbol encoding, not ASCII. */
+static bool is_symbol_text(drawingStates *states) {
+    return states != NULL &&
+           states->currentDeviceContext.font_family != NULL &&
+           strcmp(states->currentDeviceContext.font_family, "Symbol") == 0;
+}
+
+/* Return true for MT Extra text whose bytes are font-specific glyph codes. */
+static bool is_mt_extra_text(drawingStates *states) {
+    return states != NULL &&
+           states->currentDeviceContext.font_family != NULL &&
+           strcmp(states->currentDeviceContext.font_family, "MT Extra") == 0;
+}
+
+/* Return true for Euclid Math Two glyph-encoded operator text. */
+static bool is_euclid_math_two_text(drawingStates *states) {
+    return states != NULL &&
+           states->currentDeviceContext.font_family != NULL &&
+           strcmp(states->currentDeviceContext.font_family,
+                  "Euclid Math Two") == 0;
+}
+
+/* Return true for Euclid Math One glyph-encoded operator text. */
+static bool is_euclid_math_one_text(drawingStates *states) {
+    return states != NULL &&
+           states->currentDeviceContext.font_family != NULL &&
+           strcmp(states->currentDeviceContext.font_family,
+                  "Euclid Math One") == 0;
+}
+
+/* Convert font-specific single-byte text to UTF-8 for SVG output. */
+static int encoded_font_to_utf8(char *in, size_t size_in, char **out,
+                                size_t *out_len,
+                                uint32_t (*codepoint)(unsigned char)) {
+    size_t capacity = size_in * 4 + 1;
+    size_t offset = 0;
+    size_t i;
+
+    if (codepoint == NULL) {
+        return 1;
+    }
+    *out = (char *)calloc(capacity, 1);
+    if (*out == NULL) {
+        return 1;
+    }
+    for (i = 0; i < size_in; i++) {
+        if (!utf8_append_codepoint(*out, capacity, &offset,
+                                   codepoint((unsigned char)in[i]))) {
+            free(*out);
+            *out = NULL;
+            return 1;
+        }
+    }
+    (*out)[offset] = '\0';
+    *out_len = offset;
+    return 0;
+}
+
+/* Draw per-character tspans when EMF supplies explicit Dx advances. */
+static void text_positioned_chars_draw(char *contents, FILE *out,
+                                       drawingStates *states, uint8_t type,
+                                       uint32_t chars,
+                                       const double *positions) {
+    uint32_t i;
+
+    for (i = 0; i < chars; i++) {
+        char *string = NULL;
+        size_t string_size = 0;
+        char *char_data = contents + i;
+
+        if (type == UTF_16 || type == FONTINDEX) {
+            char_data = contents + i * 2;
+        }
+        text_convert(char_data, 1, &string, &string_size, type, states);
+        fprintf(out, "<%stspan x=\"%.4f\">", states->nameSpaceString,
+                positions[i]);
+        if (string != NULL) {
+            fprintf(out, "<![CDATA[%s]]>", string);
+            free(string);
+        } else {
+            fprintf(out, "<![CDATA[]]>");
+        }
+        fprintf(out, "</%stspan>", states->nameSpaceString);
+    }
+}
+
 void reverse_utf8(char *in, size_t size_in) {
     /* this assumes that str is valid UTF-8 */
     char *scanl, *scanr, *scanr2, c;
@@ -1502,6 +1729,26 @@ void text_convert(char *in, size_t size_in, char **out, size_t *size_out,
                           (uintptr_t)((uintptr_t)in + (uintptr_t)size_in))) {
             string = NULL;
         }
+        else if (is_symbol_text(states)) {
+            ret = encoded_font_to_utf8(in, size_in, (char **)&string, size_out,
+                                       symbol_codepoint);
+            type = UTF_16;
+        }
+        else if (is_mt_extra_text(states)) {
+            ret = encoded_font_to_utf8(in, size_in, (char **)&string, size_out,
+                                       mt_extra_codepoint);
+            type = UTF_16;
+        }
+        else if (is_euclid_math_two_text(states)) {
+            ret = encoded_font_to_utf8(in, size_in, (char **)&string, size_out,
+                                       euclid_math_two_codepoint);
+            type = UTF_16;
+        }
+        else if (is_euclid_math_one_text(states)) {
+            ret = encoded_font_to_utf8(in, size_in, (char **)&string, size_out,
+                                       euclid_math_one_codepoint);
+            type = UTF_16;
+        }
         else {
             string = (uint8_t *)calloc((size_in + 1), 1);
             strncpy((char *)string, in, size_in);
@@ -1538,13 +1785,19 @@ void text_draw(const char *contents, FILE *out, drawingStates *states,
                uint8_t type) {
     PU_EMRTEXT pemt =
         (PU_EMRTEXT)(contents + sizeof(U_EMREXTTEXTOUTA) - sizeof(U_EMRTEXT));
+    double *positions = NULL;
 
     returnOutOfEmf(pemt);
+
+    if (pemt->fOptions & U_ETO_GLYPH_INDEX) {
+        type = FONTINDEX;
+    }
 
     fprintf(out, "<%stext ", states->nameSpaceString);
     clipset_draw(states, out);
     POINT_D Org = point_cal(states, (double)pemt->ptlReference.x,
                             (double)pemt->ptlReference.y);
+    positions = text_dx_positions(states, contents, pemt, Org.x);
 
     text_style_draw(out, states, Org);
     fprintf(out, ">");
@@ -1558,14 +1811,20 @@ void text_draw(const char *contents, FILE *out, drawingStates *states,
                 "empty SVG text.\n");
         type = FONTINDEX;
     }
-    text_convert((char *)(contents + pemt->offString), pemt->nChars, &string,
-                 &string_size, type, states);
-
-    if (string != NULL) {
-        fprintf(out, "<![CDATA[%s]]>", string);
-        free(string);
+    if (positions != NULL) {
+        text_positioned_chars_draw((char *)(contents + pemt->offString), out,
+                                   states, type, pemt->nChars, positions);
+        free(positions);
     } else {
-        fprintf(out, "<![CDATA[]]>");
+        text_convert((char *)(contents + pemt->offString), pemt->nChars,
+                     &string, &string_size, type, states);
+
+        if (string != NULL) {
+            fprintf(out, "<![CDATA[%s]]>", string);
+            free(string);
+        } else {
+            fprintf(out, "<![CDATA[]]>");
+        }
     }
     fprintf(out, "</%stext>\n", states->nameSpaceString);
 }

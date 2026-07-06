@@ -300,8 +300,11 @@ if(USE_VENDORED_UEMF)
   set(UEMF_SOURCES
     ${DEPS_UEMF}/uemf_utf.c
     ${DEPS_UEMF}/uemf_endian.c
+    ${DEPS_UEMF}/uemf_safe.c
     ${DEPS_UEMF}/uemf.c
     ${DEPS_UEMF}/upmf.c
+    ${DEPS_UEMF}/uwmf_endian.c
+    ${DEPS_UEMF}/uwmf.c
   )
 else()
   set(UEMF_SOURCES "")
@@ -326,6 +329,7 @@ add_library(emf2svg
   src/lib/emf2svg_rec_transform.c
   src/lib/emf2svg_rec_state_record.c
   src/lib/emf2svg_print.c
+  src/lib/wmf2emf.c
   src/lib/emf2svg.c
 )
 
@@ -384,6 +388,7 @@ endif()
 
 if(NOT LONLY)
   add_executable(emf2svg-conv src/conv/emf2svg.cpp)
+  add_executable(wmf2emf-conv src/conv/wmf2emf.cpp)
 
   target_link_libraries(emf2svg-conv
     emf2svg
@@ -397,8 +402,15 @@ if(NOT LONLY)
     ${EXTERNAL_FMEM}
   )
 
+  target_link_libraries(wmf2emf-conv
+    emf2svg
+    ${EXTERNAL_ARGP}
+    ${EXTERNAL_FMEM}
+  )
+
   if(ARGP_NAME)
     add_dependencies(emf2svg-conv ${ARGP_NAME})
+    add_dependencies(wmf2emf-conv ${ARGP_NAME})
   endif(ARGP_NAME)
 
   if(GCOV)
@@ -452,6 +464,7 @@ endif ()
 list(APPEND BINTARGETS emf2svg)
 if(NOT LONLY)
   list(APPEND BINTARGETS emf2svg-conv)
+  list(APPEND BINTARGETS wmf2emf-conv)
 endif(NOT LONLY)
 
 INSTALL(TARGETS ${BINTARGETS}
