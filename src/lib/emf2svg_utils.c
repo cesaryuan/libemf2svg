@@ -15,8 +15,10 @@ extern "C" {
 #include <errno.h>
 #ifdef ENABLE_GLYPH_INDEX_TEXT
 #include <ft2build.h>
-#include <fontconfig/fontconfig.h>
 #include FT_FREETYPE_H
+#endif
+#ifdef ENABLE_GLYPH_INDEX_TEXT
+#include <fontconfig/fontconfig.h>
 #endif
 
 void U_EMRNOTIMPLEMENTED_draw(const char *name, const char *contents, FILE *out,
@@ -1550,6 +1552,10 @@ void text_draw(const char *contents, FILE *out, drawingStates *states,
     char *string = NULL;
     size_t string_size;
     if (pemt->fOptions & U_ETO_GLYPH_INDEX) {
+        /* U_ETO_GLYPH_INDEX stores font-specific glyph IDs, not text. */
+        fprintf(stderr,
+                "WARNING: U_ETO_GLYPH_INDEX text is not supported; emitting "
+                "empty SVG text.\n");
         type = FONTINDEX;
     }
     text_convert((char *)(contents + pemt->offString), pemt->nChars, &string,
