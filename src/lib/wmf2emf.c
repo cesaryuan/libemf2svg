@@ -505,7 +505,9 @@ static int wmf2emf_create_pen(wmf2emfOutput *output, wmf2emfHandleMap *map,
     if (!U_WMRCREATEPENINDIRECT_get(record, &pen)) {
         return 0;
     }
-    memcpy(&width, pen.Widthw, sizeof(pen.Widthw));
+    // WMF stores pen width as a POINT with x/y 16-bit words; y is ignored.
+    // Copying both words as a 32-bit value turns x=8,y=8 into 0x00080008.
+    width = pen.Widthw[0];
     logpen = logpen_set(pen.Style, pointl_set((int32_t)width, 0), pen.Color);
     if (emf_htable_insert(&emf_handle, output->handles) != 0 ||
         !wmf2emf_handle_create(map, emf_handle)) {
