@@ -539,6 +539,22 @@ static const char *wmf2emf_font_face_encoding(uint8_t charset) {
         return "CP936";
     case U_CHINESEBIG5_CHARSET:
         return "CP950";
+    case U_GREEK_CHARSET:
+        return "CP1253";
+    case U_TURKISH_CHARSET:
+        return "CP1254";
+    case U_HEBREW_CHARSET:
+        return "CP1255";
+    case U_ARABIC_CHARSET:
+        return "CP1256";
+    case U_BALTIC_CHARSET:
+        return "CP1257";
+    case U_RUSSIAN_CHARSET:
+        return "CP1251";
+    case U_EASTEUROPE_CHARSET:
+        return "CP1250";
+    case U_THAI_CHARSET:
+        return "CP874";
     case U_ANSI_CHARSET:
     case U_DEFAULT_CHARSET:
     case U_SYMBOL_CHARSET:
