@@ -972,6 +972,7 @@ void stroke_draw(drawingStates *states, FILE *out, bool *filled,
 void text_style_draw(FILE *out, drawingStates *states, POINT_D Org) {
     double font_height =
         fabs(scaleX(states, states->currentDeviceContext.font_height));
+    double font_width_scale = 1.0;
     if (states->currentDeviceContext.font_family != NULL) {
         fprintf(out, "font-family=\"%s\" ",
                 states->currentDeviceContext.font_family);
@@ -987,11 +988,29 @@ void text_style_draw(FILE *out, drawingStates *states, POINT_D Org) {
         orientation = 1;
     }
 
-    if (states->currentDeviceContext.font_escapement != 0) {
-        fprintf(out, "transform=\"rotate(%d, %.4f, %.4f) translate(0, %.4f)\" ",
-                (orientation *
-                 (int)states->currentDeviceContext.font_escapement / 10),
-                Org.x, (Org.y + font_height * 0.9), font_height * 0.9);
+    /* GDI lfWidth can request condensed glyphs, e.g. tall MathType brackets. */
+    if (states->currentDeviceContext.font_width != 0 && font_height > 0) {
+        font_width_scale =
+            fabs(scaleX(states, states->currentDeviceContext.font_width)) /
+            font_height;
+        font_width_scale = sqrt(sqrt(font_width_scale));
+    }
+
+    if (states->currentDeviceContext.font_escapement != 0 ||
+        fabs(font_width_scale - 1.0) > 0.01) {
+        fprintf(out, "transform=\"");
+        if (fabs(font_width_scale - 1.0) > 0.01) {
+            fprintf(out, "translate(%.4f, 0) scale(%.4f, 1) "
+                         "translate(%.4f, 0) ",
+                    Org.x, font_width_scale, -Org.x);
+        }
+        if (states->currentDeviceContext.font_escapement != 0) {
+            fprintf(out, "rotate(%d, %.4f, %.4f) translate(0, %.4f)",
+                    (orientation *
+                     (int)states->currentDeviceContext.font_escapement / 10),
+                    Org.x, (Org.y + font_height * 0.9), font_height * 0.9);
+        }
+        fprintf(out, "\" ");
     }
 
     if (states->text_layout == U_LAYOUT_RTL) {
@@ -1578,10 +1597,37 @@ static int encoded_font_to_utf8(char *in, size_t size_in, char **out,
     return 0;
 }
 
-/* Convert ANSI_CHARSET ExtTextOutA bytes as Windows-1252, fixing hat accents. */
-static int ansi_text_to_utf8(char *in, size_t size_in, char **out,
-                             size_t *out_len) {
-    return enc_to_utf8(in, size_in, out, out_len, "CP1252");
+/* Return the Windows code page used by supported ExtTextOutA charsets. */
+static const char *text_charset_encoding(drawingStates *states) {
+    if (states == NULL) {
+        return NULL;
+    }
+
+    switch (states->currentDeviceContext.font_charset) {
+    case U_ANSI_CHARSET:
+        return "CP1252";
+    case U_GB2312_CHARSET:
+        return "CP936";
+    default:
+        return NULL;
+    }
+}
+
+/* Return true when ExtTextOutA bytes must be decoded as a whole string. */
+static bool text_charset_is_multibyte(drawingStates *states) {
+    return states != NULL &&
+           states->currentDeviceContext.font_charset == U_GB2312_CHARSET;
+}
+
+/* Convert ExtTextOutA bytes through the current charset code page. */
+static int charset_text_to_utf8(char *in, size_t size_in, char **out,
+                                size_t *out_len, drawingStates *states) {
+    const char *encoding = text_charset_encoding(states);
+
+    if (encoding == NULL) {
+        return 1;
+    }
+    return enc_to_utf8(in, size_in, out, out_len, (char *)encoding);
 }
 
 /* Draw per-character tspans when EMF supplies explicit Dx advances. */
@@ -1609,6 +1655,39 @@ static void text_positioned_chars_draw(char *contents, FILE *out,
             fprintf(out, "<![CDATA[]]>");
         }
         fprintf(out, "</%stspan>", states->nameSpaceString);
+    }
+}
+
+/* Draw DBCS text at the lead-byte origin; the trail byte is only decoded. */
+static void text_positioned_multibyte_chars_draw(char *contents, FILE *out,
+                                                 drawingStates *states,
+                                                 uint32_t chars,
+                                                 const double *positions) {
+    uint32_t i = 0;
+
+    while (i < chars) {
+        unsigned char code = (unsigned char)contents[i];
+        uint32_t char_len = (code >= 0x80 && i + 1 < chars) ? 2 : 1;
+        double x = positions[i];
+        char *string = NULL;
+        size_t string_size = 0;
+
+        /*
+         * EMR_EXTTEXTOUTA counts DBCS bytes, and WMF MathType records store
+         * the visible advance on the lead byte with a zero trail-byte advance.
+         */
+        charset_text_to_utf8(contents + i, char_len, &string, &string_size,
+                             states);
+        fprintf(out, "<%stspan x=\"%.4f\"", states->nameSpaceString, x);
+        fprintf(out, ">");
+        if (string != NULL) {
+            fprintf(out, "<![CDATA[%s]]>", string);
+            free(string);
+        } else {
+            fprintf(out, "<![CDATA[]]>");
+        }
+        fprintf(out, "</%stspan>", states->nameSpaceString);
+        i += char_len;
     }
 }
 
@@ -1731,9 +1810,9 @@ void text_convert(char *in, size_t size_in, char **out, size_t *size_out,
                                        euclid_math_one_codepoint);
             type = UTF_16;
         }
-        else if (states != NULL &&
-                 states->currentDeviceContext.font_charset == U_ANSI_CHARSET) {
-            ret = ansi_text_to_utf8(in, size_in, (char **)&string, size_out);
+        else if (text_charset_encoding(states) != NULL) {
+            ret = charset_text_to_utf8(in, size_in, (char **)&string, size_out,
+                                       states);
             type = UTF_16;
         }
         else {
@@ -1792,8 +1871,15 @@ void text_draw(const char *contents, FILE *out, drawingStates *states,
     char *string = NULL;
     size_t string_size;
     if (positions != NULL) {
-        text_positioned_chars_draw((char *)(contents + pemt->offString), out,
-                                   states, type, pemt->nChars, positions);
+        if (text_charset_is_multibyte(states)) {
+            text_positioned_multibyte_chars_draw(
+                (char *)(contents + pemt->offString), out, states,
+                pemt->nChars, positions);
+        } else {
+            text_positioned_chars_draw((char *)(contents + pemt->offString),
+                                       out, states, type, pemt->nChars,
+                                       positions);
+        }
         free(positions);
     } else {
         text_convert((char *)(contents + pemt->offString), pemt->nChars,
