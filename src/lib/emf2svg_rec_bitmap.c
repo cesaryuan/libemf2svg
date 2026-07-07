@@ -9,8 +9,37 @@ extern "C" {
 #include "emf2svg_private.h"
 #include "emf2svg_print.h"
 #include <png.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
+
+/**
+  \brief Convert an EMF destination point and extent into an SVG image box.
+
+  Bitmap destination sizes are vectors, not points. We must transform both
+  corners and subtract them, otherwise viewport/window origins leak into the
+  size and shrink images like those in test-164.emf.
+  */
+static void image_dest_box(drawingStates *states, U_POINTL dest, U_POINTL cDest,
+                           POINT_D *position, POINT_D *size) {
+    POINT_D corner_a = point_cal(states, (double)dest.x, (double)dest.y);
+    POINT_D corner_b =
+        point_cal(states, (double)(dest.x + cDest.x), (double)(dest.y + cDest.y));
+
+    position->x = fmin(corner_a.x, corner_b.x);
+    position->y = fmin(corner_a.y, corner_b.y);
+    size->x = fabs(corner_b.x - corner_a.x);
+    size->y = fabs(corner_b.y - corner_a.y);
+}
+
+/**
+  \brief Start an SVG image element for a bitmap draw.
+  */
+static void image_draw_start(FILE *out, POINT_D size, POINT_D position) {
+    fprintf(out,
+            "<image width=\"%.4f\" height=\"%.4f\" x=\"%.4f\" y=\"%.4f\" ",
+            size.x, size.y, position.x, position.y);
+}
 
 void U_EMRALPHABLEND_draw(const char *contents, FILE *out,
                           drawingStates *states) {
@@ -36,12 +65,10 @@ void U_EMRALPHABLEND_draw(const char *contents, FILE *out,
     const unsigned char *BmpSrc =
         (const unsigned char *)(contents + pEmr->offBitsSrc);
 
-    POINT_D size =
-        point_cal(states, (double)pEmr->cDest.x, (double)pEmr->cDest.y);
-    POINT_D position =
-        point_cal(states, (double)pEmr->Dest.x, (double)pEmr->Dest.y);
-    fprintf(out, "<image width=\"%.4f\" height=\"%.4f\" x=\"%.4f\" y=\"%.4f\" ",
-            size.x, size.y, position.x, position.y);
+    POINT_D size;
+    POINT_D position;
+    image_dest_box(states, pEmr->Dest, pEmr->cDest, &position, &size);
+    image_draw_start(out, size, position);
 
     float alpha = (float)pEmr->Blend.Global / 255.0;
     fprintf(out, " fill-opacity=\"%.4f\" ", alpha);
@@ -110,12 +137,10 @@ void U_EMRBITBLT_draw(const char *contents, FILE *out, drawingStates *states) {
     const unsigned char *BmpSrc =
         (const unsigned char *)(contents + pEmr->offBitsSrc);
 
-    POINT_D size =
-        point_cal(states, (double)pEmr->cDest.x, (double)pEmr->cDest.y);
-    POINT_D position =
-        point_cal(states, (double)pEmr->Dest.x, (double)pEmr->Dest.y);
-    fprintf(out, "<image width=\"%.4f\" height=\"%.4f\" x=\"%.4f\" y=\"%.4f\" ",
-            size.x, size.y, position.x, position.y);
+    POINT_D size;
+    POINT_D position;
+    image_dest_box(states, pEmr->Dest, pEmr->cDest, &position, &size);
+    image_draw_start(out, size, position);
     clipset_draw(states, out);
 
     // float alpha = (float)pEmr->Blend.Global / 255.0;
@@ -169,12 +194,10 @@ void U_EMRSTRETCHBLT_draw(const char *contents, FILE *out,
     const unsigned char *BmpSrc =
         (const unsigned char *)(contents + pEmr->offBitsSrc);
 
-    POINT_D size =
-        point_cal(states, (double)pEmr->cDest.x, (double)pEmr->cDest.y);
-    POINT_D position =
-        point_cal(states, (double)pEmr->Dest.x, (double)pEmr->Dest.y);
-    fprintf(out, "<image width=\"%.4f\" height=\"%.4f\" x=\"%.4f\" y=\"%.4f\" ",
-            size.x, size.y, position.x, position.y);
+    POINT_D size;
+    POINT_D position;
+    image_dest_box(states, pEmr->Dest, pEmr->cDest, &position, &size);
+    image_draw_start(out, size, position);
     clipset_draw(states, out);
 
     dib_img_writer(contents, out, states, BmiSrc, BmpSrc,
@@ -204,12 +227,10 @@ void U_EMRSTRETCHDIBITS_draw(const char *contents, FILE *out,
     const unsigned char *BmpSrc =
         (const unsigned char *)(contents + pEmr->offBitsSrc);
 
-    POINT_D size =
-        point_cal(states, (double)pEmr->cDest.x, (double)pEmr->cDest.y);
-    POINT_D position =
-        point_cal(states, (double)pEmr->Dest.x, (double)pEmr->Dest.y);
-    fprintf(out, "<image width=\"%.4f\" height=\"%.4f\" x=\"%.4f\" y=\"%.4f\" ",
-            size.x, size.y, position.x, position.y);
+    POINT_D size;
+    POINT_D position;
+    image_dest_box(states, pEmr->Dest, pEmr->cDest, &position, &size);
+    image_draw_start(out, size, position);
     clipset_draw(states, out);
 
     dib_img_writer(contents, out, states, BmiSrc, BmpSrc,
