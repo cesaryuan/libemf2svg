@@ -28,6 +28,8 @@ SNAPSHOT_DIR="$TEST_ROOT/snapshots/emf"
 WORKDIR="$TEST_ROOT/snapshot-out/emf"
 RESIZE_OPTS=""
 VERBOSE_OPT=""
+DETAIL_DIFF=""
+CHANGED_LIST=""
 ret=0
 
 if [ "$ACTION" = "-h" ] || [ "$ACTION" = "--help" ]
@@ -55,7 +57,7 @@ absolute_path(){
 # Print command help for creating or checking SVG snapshots.
 help(){
     cat <<EOF
-usage: `basename "$0"` save|check [-h] [-e <emf dir>] [-d <snapshot dir>] [-o <work dir>] [-r] [-v]
+usage: `basename "$0"` save|check [-h] [-e <emf dir>] [-d <snapshot dir>] [-o <work dir>] [-r] [-v] [--detail-diff <sample path>]
 
 Create or compare SVG snapshots for emf2svg-conv.
 
@@ -70,12 +72,22 @@ arguments:
   -o: temporary output dir for check (default '$WORKDIR')
   -r: resize to 800x600 before snapshotting
   -v: verbose converter output
+  --detail-diff: print a unified diff for one changed sample
 EOF
 }
 
 # Print a consistent status line so branch comparisons are easy to scan.
 log_info(){
     printf "[snapshot] %s\n" "$1"
+}
+
+# Print a file only when verbose mode is enabled, keeping failed checks focused
+# on the samples that actually changed.
+log_convert(){
+    if [ -n "$VERBOSE_OPT" ]
+    then
+        log_info "convert $1"
+    fi
 }
 
 # Convert every EMF file in the input directory into a matching SVG snapshot.
@@ -92,7 +104,7 @@ generate_snapshots(){
         rel="${emf#$src_dir/}"
         svg="$dst_dir/$rel.svg"
         mkdir -p "`dirname "$svg"`"
-        log_info "convert $rel"
+        log_convert "$rel"
         "$cmd" -p $RESIZE_OPTS -i "$emf" -o "$svg" $VERBOSE_OPT
         tmpret=$?
         if [ $tmpret -ne 0 ]
@@ -103,38 +115,173 @@ generate_snapshots(){
     done
 }
 
-while getopts ":he:d:o:rv" opt; do
-  case $opt in
-    h)
+# Convert a user-provided sample path to a snapshot-relative SVG path.
+snapshot_relpath(){
+    sample="$1"
+
+    case "$sample" in
+        "$SNAPSHOT_DIR"/*)
+            sample="${sample#$SNAPSHOT_DIR/}"
+            ;;
+        "$WORKDIR"/*)
+            sample="${sample#$WORKDIR/}"
+            ;;
+        "$EMFDIR"/*)
+            sample="${sample#$EMFDIR/}.svg"
+            ;;
+        *.emf)
+            sample="$sample.svg"
+            ;;
+    esac
+
+    if [ "${sample#/}" = "$sample" ]
+    then
+        printf "%s\n" "$sample"
+    else
+        printf "%s\n" "`basename "$sample"`"
+    fi
+}
+
+# Record changed snapshot files so the default failure output stays compact.
+record_changed(){
+    printf "%s\n" "$1" >> "$CHANGED_LIST"
+}
+
+# Compare generated snapshots with the baseline and print only changed files.
+compare_snapshots(){
+    expected_dir="$1"
+    actual_dir="$2"
+    detail_rel="$3"
+    ret=0
+    total_count=0
+    changed_count=0
+
+    : > "$CHANGED_LIST"
+
+    for expected in `find "$expected_dir" -type f -name "*.svg" | sort`
+    do
+        total_count=$((total_count + 1))
+        rel="${expected#$expected_dir/}"
+        actual="$actual_dir/$rel"
+        if ! [ -f "$actual" ]
+        then
+            record_changed "$rel"
+            ret=1
+            continue
+        fi
+        if ! cmp -s "$expected" "$actual"
+        then
+            record_changed "$rel"
+            ret=1
+        fi
+    done
+
+    for actual in `find "$actual_dir" -type f -name "*.svg" | sort`
+    do
+        rel="${actual#$actual_dir/}"
+        expected="$expected_dir/$rel"
+        if ! [ -f "$expected" ]
+        then
+            total_count=$((total_count + 1))
+            record_changed "$rel"
+            ret=1
+        fi
+    done
+
+    sort -u "$CHANGED_LIST" > "$CHANGED_LIST.sorted"
+    changed_count=`wc -l < "$CHANGED_LIST.sorted" | tr -d ' '`
+
+    if [ $ret -ne 0 ]
+    then
+        cat "$CHANGED_LIST.sorted"
+        log_info "changed: $changed_count / $total_count"
+        if [ -n "$detail_rel" ]
+        then
+            printf "\n"
+            if grep -qx "$detail_rel" "$CHANGED_LIST.sorted"
+            then
+                diff -u "$expected_dir/$detail_rel" "$actual_dir/$detail_rel"
+            else
+                printf "[snapshot] '%s' is not in the changed snapshot list\n" "$detail_rel"
+            fi
+        fi
+    else
+        log_info "changed: 0 / $total_count"
+    fi
+
+    return $ret
+}
+
+while [ $# -gt 0 ]
+do
+  opt="$1"
+  case "$opt" in
+    -h)
         help
         exit 0
         ;;
-    e)
-        EMFDIR="$OPTARG"
+    -e)
+        shift
+        if [ $# -eq 0 ]
+        then
+            echo "Option -e requires an argument." >&2
+            help
+            exit 1
+        fi
+        EMFDIR="$1"
         ;;
-    d)
-        SNAPSHOT_DIR="$OPTARG"
+    -d)
+        shift
+        if [ $# -eq 0 ]
+        then
+            echo "Option -d requires an argument." >&2
+            help
+            exit 1
+        fi
+        SNAPSHOT_DIR="$1"
         ;;
-    o)
-        WORKDIR="$OPTARG"
+    -o)
+        shift
+        if [ $# -eq 0 ]
+        then
+            echo "Option -o requires an argument." >&2
+            help
+            exit 1
+        fi
+        WORKDIR="$1"
         ;;
-    r)
+    -r)
         RESIZE_OPTS="-w 800 -h 600"
         ;;
-    v)
+    -v)
         VERBOSE_OPT="--verbose"
         ;;
-    \?)
-        echo "Invalid option: -$OPTARG" >&2
+    --detail-diff)
+        shift
+        if [ $# -eq 0 ]
+        then
+            echo "Option --detail-diff requires an argument." >&2
+            help
+            exit 1
+        fi
+        DETAIL_DIFF="$1"
+        ;;
+    --)
+        shift
+        break
+        ;;
+    -*)
+        echo "Invalid option: $opt" >&2
         help
         exit 1
         ;;
-    :)
-        echo "Option -$OPTARG requires an argument." >&2
+    *)
+        echo "Invalid argument: $opt" >&2
         help
         exit 1
         ;;
   esac
+  shift
 done
 
 if [ "$ACTION" = "help" ]
@@ -190,6 +337,7 @@ then
     printf "Create it first with: ./tests/resources/snapshot.sh save\n"
     exit 1
 fi
+SNAPSHOT_DIR="`cd "$SNAPSHOT_DIR" && pwd -P`"
 
 log_info "checking snapshots against $SNAPSHOT_DIR"
 generate_snapshots "$EMFDIR" "$WORKDIR" "$CMD"
@@ -198,8 +346,16 @@ then
     printf "[%bFAIL%b] Snapshot generation failed\n" "$BRed" "$RCol"
     exit $ret
 fi
+WORKDIR="`cd "$WORKDIR" && pwd -P`"
 
-diff -ru "$SNAPSHOT_DIR" "$WORKDIR"
+CHANGED_LIST="$TEST_ROOT/snapshot-out/changed-files.txt"
+mkdir -p "`dirname "$CHANGED_LIST"`"
+if [ -n "$DETAIL_DIFF" ]
+then
+    DETAIL_DIFF="`snapshot_relpath "$DETAIL_DIFF"`"
+fi
+
+compare_snapshots "$SNAPSHOT_DIR" "$WORKDIR" "$DETAIL_DIFF"
 ret=$?
 if [ $ret -ne 0 ]
 then
