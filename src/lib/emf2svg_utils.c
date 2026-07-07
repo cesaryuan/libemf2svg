@@ -437,6 +437,20 @@ void lineto_draw(const char *name, const char *field1, const char *field2,
     UNUSED(name);
     PU_EMRGENERICPAIR pEmr = (PU_EMRGENERICPAIR)(contents);
     startPathDraw(states, out);
+
+    // Some EMFs move the current point before BEGINPATH and start the path
+    // itself with a LINETO. Seed that missing move so dashed paths like
+    // test-014.emf do not serialize as an invalid SVG path that starts with L.
+    if (states->inPath && states->currentPath == NULL) {
+        U_POINT current_point;
+        current_point.x = states->cur_x;
+        current_point.y = states->cur_y;
+        fprintf(out, "M ");
+        point_draw(states, current_point, out);
+        addNewSegPath(states, SEG_MOVE);
+        pointCurrPathAdd(states, current_point, 0);
+    }
+
     fprintf(out, "L ");
     point_draw(states, pEmr->pair, out);
     addNewSegPath(states, SEG_LINE);
