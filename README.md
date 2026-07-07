@@ -466,6 +466,19 @@ tests/out/test-000.emf.svg  tests/out/test-051.emf.svg
 
 The emf files used for these checks are located in [./tests/resources/emf/](https://github.com/kakwa/libemf2svg/blob/master/tests/resources/emf/).
 
+* Check SVG snapshots against the current baseline:
+
+```bash
+# Save the current converter output as the baseline.
+$ ./tests/resources/snapshot.sh save
+
+# On another branch, regenerate SVGs and compare them with the baseline.
+$ ./tests/resources/snapshot.sh check
+```
+
+The default baseline lives in `tests/snapshots/emf/`, and temporary comparison
+output goes to `tests/snapshot-out/emf/`.
+
 Useful Commands
 ---------------
 
