@@ -279,6 +279,30 @@ static U_POINT16 wmf2emf_text_reference_point(const wmf2emfState *state,
     return record_point;
 }
 
+/* Advance TA_UPDATECP current point after text records that carry explicit Dx widths. */
+static void wmf2emf_state_advance_text(wmf2emfState *state, U_POINT16 origin,
+                                       int16_t length, const int16_t *dx) {
+    int32_t advance = 0;
+    int32_t next_x;
+    int i;
+
+    if (state == NULL || dx == NULL ||
+        (state->text_align & U_TA_UPDATECP) != U_TA_UPDATECP) {
+        return;
+    }
+    for (i = 0; i < length; i++) {
+        advance += dx[i];
+    }
+    next_x = origin.x + advance;
+    if (next_x > INT16_MAX) {
+        next_x = INT16_MAX;
+    } else if (next_x < INT16_MIN) {
+        next_x = INT16_MIN;
+    }
+    state->current_point = (U_POINT16){(int16_t)next_x, origin.y};
+    state->has_current_point = true;
+}
+
 /* Allocate a small EMF writer backed by fmem so the public API stays in memory. */
 static int wmf2emf_output_init(wmf2emfOutput *output) {
     FILE *stream;
@@ -507,14 +531,28 @@ static uint8_t wmf2emf_font_u8(const char *font, size_t offset) {
 /* Return the byte encoding implied by the WMF LOGFONT charset. */
 static const char *wmf2emf_font_face_encoding(uint8_t charset) {
     switch (charset) {
+    case U_SHIFTJIS_CHARSET:
+        return "CP932";
+    case U_HANGUL_CHARSET:
+        return "CP949";
     case U_GB2312_CHARSET:
         return "CP936";
+    case U_CHINESEBIG5_CHARSET:
+        return "CP950";
     case U_ANSI_CHARSET:
     case U_DEFAULT_CHARSET:
     case U_SYMBOL_CHARSET:
     default:
         return "CP1252";
     }
+}
+
+/* Return true for common CP936 face names that are sometimes mislabeled. */
+static bool wmf2emf_is_cp936_face(const char *face, size_t face_len) {
+    static const unsigned char simsun[] = {0xCB, 0xCE, 0xCC, 0xE5};
+
+    return face != NULL && face_len == sizeof(simsun) &&
+           memcmp(face, simsun, sizeof(simsun)) == 0;
 }
 
 /* Copy the raw WMF ANSI/DBCS face name bytes and return their byte length. */
@@ -620,6 +658,8 @@ static int wmf2emf_create_font(wmf2emfOutput *output, wmf2emfHandleMap *map,
     char *face = NULL;
     size_t face_len = 0;
     uint16_t *face_wide = NULL;
+    uint8_t charset;
+    uint8_t face_charset;
     U_LOGFONT logfont;
     uint32_t emf_handle = 0;
     char *emf_record;
@@ -631,8 +671,17 @@ static int wmf2emf_create_font(wmf2emfOutput *output, wmf2emfHandleMap *map,
     if (face == NULL) {
         return 0;
     }
-    face_wide = wmf2emf_font_face_utf16(
-        face, face_len, wmf2emf_font_u8(font_data, offsetof(U_FONT, CharSet)));
+    charset = wmf2emf_font_u8(font_data, offsetof(U_FONT, CharSet));
+    face_charset = charset;
+    if (wmf2emf_is_cp936_face(face, face_len)) {
+        /*
+         * Some MathType WMFs store the SimSun face name as CP936 bytes while
+         * using Shift-JIS/Hangul charsets for symbol bytes.  Decode only the
+         * face name as CP936; the text charset still carries drawing meaning.
+         */
+        face_charset = U_GB2312_CHARSET;
+    }
+    face_wide = wmf2emf_font_face_utf16(face, face_len, face_charset);
     if (face_wide == NULL) {
         wmf2emf_log(ctx, "failed to convert WMF font face '%s'", face);
         free(face);
@@ -647,7 +696,7 @@ static int wmf2emf_create_font(wmf2emfOutput *output, wmf2emfHandleMap *map,
         wmf2emf_font_u8(font_data, offsetof(U_FONT, Italic)),
         wmf2emf_font_u8(font_data, offsetof(U_FONT, Underline)),
         wmf2emf_font_u8(font_data, offsetof(U_FONT, StrikeOut)),
-        wmf2emf_font_u8(font_data, offsetof(U_FONT, CharSet)),
+        charset,
         wmf2emf_font_u8(font_data, offsetof(U_FONT, OutPrecision)),
         wmf2emf_font_u8(font_data, offsetof(U_FONT, ClipPrecision)),
         wmf2emf_font_u8(font_data, offsetof(U_FONT, Quality)),
@@ -740,7 +789,8 @@ static U_POINTL *wmf2emf_points16_to_points32(const U_POINT16 *points,
 static int wmf2emf_append_text(wmf2emfOutput *output, U_POINT16 dst,
                                int16_t length, uint16_t options,
                                const char *string, const int16_t *dx,
-                               U_RECT16 rect, wmf2emfContext *ctx) {
+                               U_RECT16 rect, wmf2emfState *state,
+                               wmf2emfContext *ctx) {
     char *emrtext;
     char *record;
     char *text_copy;
@@ -748,6 +798,7 @@ static int wmf2emf_append_text(wmf2emfOutput *output, U_POINT16 dst,
     uint32_t text_options;
     bool has_dx = dx != NULL;
     int i;
+    int ok;
     U_RECTL bounds;
 
     if (length <= 0) {
@@ -795,7 +846,11 @@ static int wmf2emf_append_text(wmf2emfOutput *output, U_POINT16 dst,
         wmf2emf_log(ctx, "failed to build EMR_EXTTEXTOUTA length=%d options=0x%04X sanitized=0x%08X", length, options, text_options);
         return 0;
     }
-    return wmf2emf_append_record(output, record);
+    ok = wmf2emf_append_record(output, record);
+    if (ok) {
+        wmf2emf_state_advance_text(state, dst, length, dx);
+    }
+    return ok;
 }
 
 /* Return the WMF dx array only when it is fully present in the current record. */
@@ -1020,13 +1075,13 @@ static int wmf2emf_translate_record(wmf2emfOutput *output,
         }
         dx = wmf2emf_exttext_dx_if_present(record, text_len, mode);
         point = wmf2emf_text_reference_point(state, point);
-        return wmf2emf_append_text(output, point, text_len, mode, data, dx, rect, ctx);
+        return wmf2emf_append_text(output, point, text_len, mode, data, dx, rect, state, ctx);
     case U_WMR_TEXTOUT:
         if (!U_WMRTEXTOUT_get(record, &point, &text_len, &data)) {
             return 0;
         }
         point = wmf2emf_text_reference_point(state, point);
-        return wmf2emf_append_text(output, point, text_len, U_ETO_NONE, data, NULL, U_RCL16_DEF, ctx);
+        return wmf2emf_append_text(output, point, text_len, U_ETO_NONE, data, NULL, U_RCL16_DEF, state, ctx);
     case U_WMR_POLYPOLYGON:
         if (!U_WMRPOLYPOLYGON_get(record, &count16, (const uint16_t **)&dx, &data)) {
             return 0;
