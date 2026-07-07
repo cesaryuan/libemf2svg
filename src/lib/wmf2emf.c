@@ -10,6 +10,7 @@ extern "C" {
 #include "internal-fmem.h"
 #include "uemf.h"
 #include "uwmf.h"
+#include <iconv.h>
 #include <limits.h>
 #include <stdarg.h>
 #include <stdbool.h>
@@ -503,8 +504,21 @@ static uint8_t wmf2emf_font_u8(const char *font, size_t offset) {
     return (uint8_t)*(const unsigned char *)(font + offset);
 }
 
-/* Copy the WMF ANSI face name into a small UTF-8-compatible buffer. */
-static char *wmf2emf_font_face_copy(const char *font) {
+/* Return the byte encoding implied by the WMF LOGFONT charset. */
+static const char *wmf2emf_font_face_encoding(uint8_t charset) {
+    switch (charset) {
+    case U_GB2312_CHARSET:
+        return "CP936";
+    case U_ANSI_CHARSET:
+    case U_DEFAULT_CHARSET:
+    case U_SYMBOL_CHARSET:
+    default:
+        return "CP1252";
+    }
+}
+
+/* Copy the raw WMF ANSI/DBCS face name bytes and return their byte length. */
+static char *wmf2emf_font_face_copy(const char *font, size_t *face_len) {
     const char *face = font + offsetof(U_FONT, FaceName);
     size_t max_len = 31;
     size_t len = 0;
@@ -517,6 +531,9 @@ static char *wmf2emf_font_face_copy(const char *font) {
         face = "Arial";
         len = strlen(face);
     }
+    if (face_len != NULL) {
+        *face_len = len;
+    }
     copy = (char *)calloc(len + 1, sizeof(char));
     if (copy != NULL) {
         memcpy(copy, face, len);
@@ -524,13 +541,31 @@ static char *wmf2emf_font_face_copy(const char *font) {
     return copy;
 }
 
-/* Convert a WMF ANSI face name to UTF-16LE, falling back when bytes are invalid. */
-static uint16_t *wmf2emf_font_face_utf16(const char *face) {
-    uint16_t *wide = U_Utf8ToUtf16le(face, 0, NULL);
+/* Convert a WMF ANSI/DBCS face name to UTF-16LE using its LOGFONT charset. */
+static uint16_t *wmf2emf_font_face_utf16(const char *face, size_t face_len,
+                                         uint8_t charset) {
+    const char *encoding = wmf2emf_font_face_encoding(charset);
+    size_t out_bytes = (face_len + 1) * 4;
+    uint16_t *wide = (uint16_t *)calloc(out_bytes, 1);
+    char *inbuf = (char *)face;
+    char *outbuf = (char *)wide;
+    size_t in_left = face_len;
+    size_t out_left = out_bytes - sizeof(uint16_t);
+    iconv_t cd;
 
     if (wide == NULL) {
-        wide = U_Utf8ToUtf16le("Arial", 0, NULL);
+        return NULL;
     }
+    cd = iconv_open("UTF-16LE", encoding);
+    if (cd == (iconv_t)-1 ||
+        iconv(cd, &inbuf, &in_left, &outbuf, &out_left) == (size_t)-1) {
+        if (cd != (iconv_t)-1) {
+            iconv_close(cd);
+        }
+        free(wide);
+        return U_Utf8ToUtf16le("Arial", 0, NULL);
+    }
+    iconv_close(cd);
     return wide;
 }
 
@@ -583,6 +618,7 @@ static int wmf2emf_create_font(wmf2emfOutput *output, wmf2emfHandleMap *map,
                                const char *record, wmf2emfContext *ctx) {
     const char *font_data = NULL;
     char *face = NULL;
+    size_t face_len = 0;
     uint16_t *face_wide = NULL;
     U_LOGFONT logfont;
     uint32_t emf_handle = 0;
@@ -591,11 +627,12 @@ static int wmf2emf_create_font(wmf2emfOutput *output, wmf2emfHandleMap *map,
     if (!U_WMRCREATEFONTINDIRECT_get(record, &font_data) || font_data == NULL) {
         return 0;
     }
-    face = wmf2emf_font_face_copy(font_data);
+    face = wmf2emf_font_face_copy(font_data, &face_len);
     if (face == NULL) {
         return 0;
     }
-    face_wide = wmf2emf_font_face_utf16(face);
+    face_wide = wmf2emf_font_face_utf16(
+        face, face_len, wmf2emf_font_u8(font_data, offsetof(U_FONT, CharSet)));
     if (face_wide == NULL) {
         wmf2emf_log(ctx, "failed to convert WMF font face '%s'", face);
         free(face);
