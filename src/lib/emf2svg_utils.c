@@ -1010,21 +1010,17 @@ void stroke_draw(drawingStates *states, FILE *out, bool *filled,
     }
 }
 
-/* Convert GDI LOGFONT height to the SVG em size used by font-size.
- * Positive lfHeight is a cell height, while negative lfHeight is already the
- * requested character height.  EMF does not carry TEXTMETRIC internal-leading
- * data, so positive heights use a conservative cell-to-em approximation.
+/*
+ * Convert GDI LOGFONT height to SVG font-size while preserving signed height
+ * semantics.  A global cell-to-em shrink for positive lfHeight makes EMF Dx
+ * advances too loose, so both signs use the requested logical height here.
  */
 static double svg_font_size_from_logfont_height(drawingStates *states) {
     int32_t logical_height = states->currentDeviceContext.font_height;
     double abs_height =
         logical_height < 0 ? -(double)logical_height : (double)logical_height;
-    double font_height = fabs(scaleX(states, abs_height));
 
-    if (logical_height > 0) {
-        font_height *= 0.85;
-    }
-    return font_height;
+    return fabs(scaleX(states, abs_height));
 }
 
 /* Return true when a CSS font-family name needs string quoting in SVG. */
@@ -1603,9 +1599,15 @@ typedef enum symbol_cmap_match {
     SYMBOL_CMAP_PREFIX
 } symbol_cmap_match;
 
+typedef enum symbol_cmap_charset_rule {
+    SYMBOL_CMAP_SYMBOLISH_CHARSET,
+    SYMBOL_CMAP_ANY_CHARSET
+} symbol_cmap_charset_rule;
+
 typedef struct symbol_cmap_font {
     const char *family;
     symbol_cmap_match match;
+    symbol_cmap_charset_rule charset_rule;
     const symbol_cmap_range *ranges;
     size_t range_count;
 } symbol_cmap_font;
@@ -1652,32 +1654,41 @@ static const symbol_cmap_range euclid_math_one_ranges[] = {
  * keep narrower per-font ranges to avoid remapping bytes they do not encode.
  */
 static const symbol_cmap_font symbol_cmap_fonts[] = {
-    {"Symbol", SYMBOL_CMAP_EXACT, symbol_ranges,
+    {"Symbol", SYMBOL_CMAP_EXACT, SYMBOL_CMAP_SYMBOLISH_CHARSET, symbol_ranges,
      sizeof(symbol_ranges) / sizeof(symbol_ranges[0])},
-    {"Wingdings 2", SYMBOL_CMAP_EXACT, wingdings_2_ranges,
+    {"Wingdings 2", SYMBOL_CMAP_EXACT, SYMBOL_CMAP_SYMBOLISH_CHARSET,
+     wingdings_2_ranges,
      sizeof(wingdings_2_ranges) / sizeof(wingdings_2_ranges[0])},
-    {"Wingdings 3", SYMBOL_CMAP_EXACT, wingdings_3_ranges,
+    {"Wingdings 3", SYMBOL_CMAP_EXACT, SYMBOL_CMAP_SYMBOLISH_CHARSET,
+     wingdings_3_ranges,
      sizeof(wingdings_3_ranges) / sizeof(wingdings_3_ranges[0])},
-    {"Wingdings", SYMBOL_CMAP_EXACT, wingdings_ranges,
+    {"Wingdings", SYMBOL_CMAP_EXACT, SYMBOL_CMAP_SYMBOLISH_CHARSET,
+     wingdings_ranges,
      sizeof(wingdings_ranges) / sizeof(wingdings_ranges[0])},
-    {"Webdings", SYMBOL_CMAP_EXACT, wingdings_ranges,
+    {"Webdings", SYMBOL_CMAP_EXACT, SYMBOL_CMAP_SYMBOLISH_CHARSET,
+     wingdings_ranges,
      sizeof(wingdings_ranges) / sizeof(wingdings_ranges[0])},
-    {"Marlett", SYMBOL_CMAP_EXACT, marlett_ranges,
+    {"Marlett", SYMBOL_CMAP_EXACT, SYMBOL_CMAP_SYMBOLISH_CHARSET,
+     marlett_ranges,
      sizeof(marlett_ranges) / sizeof(marlett_ranges[0])},
-    {"MS Reference Specialty", SYMBOL_CMAP_EXACT,
+    {"MS Reference Specialty", SYMBOL_CMAP_EXACT, SYMBOL_CMAP_SYMBOLISH_CHARSET,
      ms_reference_specialty_ranges,
      sizeof(ms_reference_specialty_ranges) /
          sizeof(ms_reference_specialty_ranges[0])},
-    {"MS Outlook", SYMBOL_CMAP_EXACT, ms_outlook_ranges,
+    {"MS Outlook", SYMBOL_CMAP_EXACT, SYMBOL_CMAP_SYMBOLISH_CHARSET,
+     ms_outlook_ranges,
      sizeof(ms_outlook_ranges) / sizeof(ms_outlook_ranges[0])},
-    {"Bookshelf Symbol 7", SYMBOL_CMAP_EXACT, bookshelf_symbol_7_ranges,
+    {"Bookshelf Symbol 7", SYMBOL_CMAP_EXACT, SYMBOL_CMAP_SYMBOLISH_CHARSET,
+     bookshelf_symbol_7_ranges,
      sizeof(bookshelf_symbol_7_ranges) /
          sizeof(bookshelf_symbol_7_ranges[0])},
-    {"MT Extra", SYMBOL_CMAP_EXACT, mt_extra_ranges,
+    {"MT Extra", SYMBOL_CMAP_EXACT, SYMBOL_CMAP_ANY_CHARSET, mt_extra_ranges,
      sizeof(mt_extra_ranges) / sizeof(mt_extra_ranges[0])},
-    {"Euclid Math Two", SYMBOL_CMAP_EXACT, euclid_math_two_ranges,
+    {"Euclid Math Two", SYMBOL_CMAP_EXACT, SYMBOL_CMAP_ANY_CHARSET,
+     euclid_math_two_ranges,
      sizeof(euclid_math_two_ranges) / sizeof(euclid_math_two_ranges[0])},
-    {"Euclid Math One", SYMBOL_CMAP_EXACT, euclid_math_one_ranges,
+    {"Euclid Math One", SYMBOL_CMAP_EXACT, SYMBOL_CMAP_ANY_CHARSET,
+     euclid_math_one_ranges,
      sizeof(euclid_math_one_ranges) / sizeof(euclid_math_one_ranges[0])}};
 
 /* Return an ASCII-lowercase byte for case-insensitive font-family matching. */
@@ -1721,9 +1732,26 @@ static bool font_family_starts_with(const char *family, const char *prefix) {
     return true;
 }
 
+/*
+ * Return true when the LOGFONT charset can address a Windows symbol cmap.
+ * ANSI_CHARSET plus Wingdings can be a font-mapper fallback request whose bytes
+ * must stay normal text, as seen in tests/resources/wmf/text.wmf.
+ */
+static bool symbol_cmap_font_accepts_charset(const symbol_cmap_font *font,
+                                             uint8_t charset) {
+    if (font == NULL) {
+        return false;
+    }
+    if (font->charset_rule == SYMBOL_CMAP_ANY_CHARSET) {
+        return true;
+    }
+    return charset == U_SYMBOL_CHARSET || charset == U_DEFAULT_CHARSET;
+}
+
 /* Return the symbol-cmap rule for the current font family, if one is known. */
 static const symbol_cmap_font *find_symbol_cmap_font(drawingStates *states) {
     const char *family;
+    uint8_t charset;
     size_t i;
 
     if (states == NULL) {
@@ -1731,8 +1759,13 @@ static const symbol_cmap_font *find_symbol_cmap_font(drawingStates *states) {
     }
 
     family = states->currentDeviceContext.font_family;
+    charset = states->currentDeviceContext.font_charset;
     for (i = 0; i < sizeof(symbol_cmap_fonts) / sizeof(symbol_cmap_fonts[0]);
          i++) {
+        if (!symbol_cmap_font_accepts_charset(&symbol_cmap_fonts[i],
+                                              charset)) {
+            continue;
+        }
         if (symbol_cmap_fonts[i].match == SYMBOL_CMAP_PREFIX &&
             font_family_starts_with(family, symbol_cmap_fonts[i].family)) {
             return &symbol_cmap_fonts[i];
