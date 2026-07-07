@@ -1027,11 +1027,73 @@ static double svg_font_size_from_logfont_height(drawingStates *states) {
     return font_height;
 }
 
+/* Return true when a CSS font-family name needs string quoting in SVG. */
+static bool svg_font_family_needs_quotes(const char *family) {
+    size_t i;
+    bool token_start = true;
+
+    if (family == NULL || family[0] == '\0') {
+        return false;
+    }
+    for (i = 0; family[i] != '\0'; i++) {
+        unsigned char c = (unsigned char)family[i];
+
+        if (c == ' ') {
+            token_start = true;
+            continue;
+        }
+        if (token_start && c >= '0' && c <= '9') {
+            return true;
+        }
+        if (!(c == '-' || c == '_' || (c >= '0' && c <= '9') ||
+              (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+              c >= 0x80)) {
+            return true;
+        }
+        token_start = false;
+    }
+    return false;
+}
+
+/* Emit a font-family attribute, quoting names like "Wingdings 2" for CSS. */
+static void svg_font_family_draw(FILE *out, const char *family) {
+    const char *p;
+
+    if (family == NULL) {
+        return;
+    }
+    if (!svg_font_family_needs_quotes(family)) {
+        fprintf(out, "font-family=\"%s\" ", family);
+        return;
+    }
+
+    fprintf(out, "font-family=\"&quot;");
+    for (p = family; *p != '\0'; p++) {
+        switch (*p) {
+        case '&':
+            fprintf(out, "&amp;");
+            break;
+        case '<':
+            fprintf(out, "&lt;");
+            break;
+        case '"':
+            fprintf(out, "\\&quot;");
+            break;
+        case '\\':
+            fprintf(out, "\\\\");
+            break;
+        default:
+            fputc(*p, out);
+            break;
+        }
+    }
+    fprintf(out, "&quot;\" ");
+}
+
 void text_style_draw(FILE *out, drawingStates *states, POINT_D Org) {
     double font_height = svg_font_size_from_logfont_height(states);
     if (states->currentDeviceContext.font_family != NULL) {
-        fprintf(out, "font-family=\"%s\" ",
-                states->currentDeviceContext.font_family);
+        svg_font_family_draw(out, states->currentDeviceContext.font_family);
     }
     fprintf(out, "fill=\"#%02X%02X%02X\" ",
             states->currentDeviceContext.text_red,
