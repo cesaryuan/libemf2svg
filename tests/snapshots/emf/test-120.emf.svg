@@ -32,7 +32,7 @@
 <g transform="matrix(1.0020 0.0000 0.0000 1.0048 -187.8348 155.0067)">
 </g>
 <g transform="matrix(1.0020 0.0000 0.0000 1.0048 -187.8348 155.0067)">
-<text fill="#000000" style ="white-space:pre;" font-weight="400" text-anchor="start" x="231.0000" y="12.0000" font-size="13.0000" ><![CDATA[0,0000]]></text>
+<text fill="#000000" style ="white-space:pre;" font-weight="400" text-anchor="start" x="231.0000" y="12.0000" font-size="13.0000" ><tspan x="231.0000"><![CDATA[0]]></tspan><tspan x="238.0000"><![CDATA[,]]></tspan><tspan x="241.0000"><![CDATA[0]]></tspan><tspan x="248.0000"><![CDATA[0]]></tspan><tspan x="255.0000"><![CDATA[0]]></tspan><tspan x="262.0000"><![CDATA[0]]></tspan></text>
 </g>
 <g transform="matrix(1.0020 0.0000 0.0000 1.0048 -191.1747 132.4610)">
 </g>
@@ -49,7 +49,7 @@
 <g transform="matrix(1.0020 0.0000 0.0000 1.0048 -191.1747 132.4610)">
 </g>
 <g transform="matrix(1.0020 0.0000 0.0000 1.0048 -191.1747 132.4610)">
-<text fill="#000000" style ="white-space:pre;" font-weight="400" text-anchor="start" x="227.0000" y="12.0000" font-size="13.0000" ><![CDATA[20,0000]]></text>
+<text fill="#000000" style ="white-space:pre;" font-weight="400" text-anchor="start" x="227.0000" y="12.0000" font-size="13.0000" ><tspan x="227.0000"><![CDATA[2]]></tspan><tspan x="234.0000"><![CDATA[0]]></tspan><tspan x="241.0000"><![CDATA[,]]></tspan><tspan x="244.0000"><![CDATA[0]]></tspan><tspan x="251.0000"><![CDATA[0]]></tspan><tspan x="258.0000"><![CDATA[0]]></tspan><tspan x="265.0000"><![CDATA[0]]></tspan></text>
 </g>
 <g transform="matrix(1.0020 0.0000 0.0000 1.0048 -191.1747 109.9152)">
 </g>
@@ -66,7 +66,7 @@
 <g transform="matrix(1.0020 0.0000 0.0000 1.0048 -191.1747 109.9152)">
 </g>
 <g transform="matrix(1.0020 0.0000 0.0000 1.0048 -191.1747 109.9152)">
-<text fill="#000000" style ="white-space:pre;" font-weight="400" text-anchor="start" x="227.0000" y="12.0000" font-size="13.0000" ><![CDATA[40,0000]]></text>
+<text fill="#000000" style ="white-space:pre;" font-weight="400" text-anchor="start" x="227.0000" y="12.0000" font-size="13.0000" ><tspan x="227.0000"><![CDATA[4]]></tspan><tspan x="234.0000"><![CDATA[0]]></tspan><tspan x="241.0000"><![CDATA[,]]></tspan><tspan x="244.0000"><![CDATA[0]]></tspan><tspan x="251.0000"><![CDATA[0]]></tspan><tspan x="258.0000"><![CDATA[0]]></tspan><tspan x="265.0000"><![CDATA[0]]></tspan></text>
 </g>
 <g transform="matrix(1.0020 0.0000 0.0000 1.0048 -191.1747 87.3695)">
 </g>
@@ -83,7 +83,7 @@
 <g transform="matrix(1.0020 0.0000 0.0000 1.0048 -191.1747 87.3695)">
 </g>
 <g transform="matrix(1.0020 0.0000 0.0000 1.0048 -191.1747 87.3695)">
-<text fill="#000000" style ="white-space:pre;" font-weight="400" text-anchor="start" x="227.0000" y="12.0000" font-size="13.0000" ><![CDATA[60,0000]]></text>
+<text fill="#000000" style ="white-space:pre;" font-weight="400" text-anchor="start" x="227.0000" y="12.0000" font-size="13.0000" ><tspan x="227.0000"><![CDATA[6]]></tspan><tspan x="234.0000"><![CDATA[0]]></tspan><tspan x="241.0000"><![CDATA[,]]></tspan><tspan x="244.0000"><![CDATA[0]]></tspan><tspan x="251.0000"><![CDATA[0]]></tspan><tspan x="258.0000"><![CDATA[0]]></tspan><tspan x="265.0000"><![CDATA[0]]></tspan></text>
 </g>
 <g transform="matrix(1.0020 0.0000 0.0000 1.0048 -191.1747 64.8238)">
 </g>
@@ -100,7 +100,7 @@
 <g transform="matrix(1.0020 0.0000 0.0000 1.0048 -191.1747 64.8238)">
 </g>
 <g transform="matrix(1.0020 0.0000 0.0000 1.0048 -191.1747 64.8238)">
-<text fill="#000000" style ="white-space:pre;" font-weight="400" text-anchor="start" x="227.0000" y="12.0000" font-size="13.0000" ><![CDATA[80,0000]]></text>
+<text fill="#000000" style ="white-space:pre;" font-weight="400" text-anchor="start" x="227.0000" y="12.0000" font-size="13.0000" ><tspan x="227.0000"><![CDATA[8]]></tspan><tspan x="234.0000"><![CDATA[0]]></tspan><tspan x="241.0000"><![CDATA[,]]></tspan><tspan x="244.0000"><![CDATA[0]]></tspan><tspan x="251.0000"><![CDATA[0]]></tspan><tspan x="258.0000"><![CDATA[0]]></tspan><tspan x="265.0000"><![CDATA[0]]></tspan></text>
 </g>
 <g transform="matrix(1.0020 0.0000 0.0000 1.0048 -194.5145 42.2781)">
 </g>
@@ -117,7 +117,7 @@
 <g transform="matrix(1.0020 0.0000 0.0000 1.0048 -194.5145 42.2781)">
 </g>
 <g transform="matrix(1.0020 0.0000 0.0000 1.0048 -194.5145 42.2781)">
-<text fill="#000000" style ="white-space:pre;" font-weight="400" text-anchor="start" x="224.0000" y="12.0000" font-size="13.0000" ><![CDATA[100,0000]]></text>
+<text fill="#000000" style ="white-space:pre;" font-weight="400" text-anchor="start" x="224.0000" y="12.0000" font-size="13.0000" ><tspan x="224.0000"><![CDATA[1]]></tspan><tspan x="231.0000"><![CDATA[0]]></tspan><tspan x="238.0000"><![CDATA[0]]></tspan><tspan x="245.0000"><![CDATA[,]]></tspan><tspan x="248.0000"><![CDATA[0]]></tspan><tspan x="255.0000"><![CDATA[0]]></tspan><tspan x="262.0000"><![CDATA[0]]></tspan><tspan x="269.0000"><![CDATA[0]]></tspan></text>
 </g>
 <g transform="matrix(0.0626 0.0000 0.0000 0.0628 0.0000 0.0000)">
 <path d="M 1496.0000,2592.0000 L 1496.0000,2656.0000 L 1480.0000,2656.0000 L 1480.0000,2592.0000 L 1496.0000,2592.0000 Z M 3144.0000,2592.0000 L 3144.0000,2656.0000 L 3128.0000,2656.0000 L 3128.0000,2592.0000 L 3144.0000,2592.0000 Z M 4808.0000,2592.0000 L 4808.0000,2656.0000 L 4792.0000,2656.0000 L 4792.0000,2592.0000 L 4808.0000,2592.0000 Z "  fill="#868686" stroke="#868686" stroke-width="1.0000"  stroke-linecap="butt"  stroke-linejoin="round" />
@@ -139,7 +139,7 @@
 <g transform="matrix(1.0020 0.0000 0.0000 1.0048 94.6163 174.7559)">
 </g>
 <g transform="matrix(1.0020 0.0000 0.0000 1.0048 94.6163 174.7559)">
-<text fill="#000000" style ="white-space:pre;" font-weight="400" text-anchor="start" x="2.0000" y="12.0000" font-size="13.0000" ><![CDATA[EPU M'sila sang ]]></text>
+<text fill="#000000" style ="white-space:pre;" font-weight="400" text-anchor="start" x="2.0000" y="12.0000" font-size="13.0000" ><tspan x="2.0000"><![CDATA[E]]></tspan><tspan x="10.0000"><![CDATA[P]]></tspan><tspan x="17.0000"><![CDATA[U]]></tspan><tspan x="26.0000"><![CDATA[ ]]></tspan><tspan x="30.0000"><![CDATA[M]]></tspan><tspan x="42.0000"><![CDATA[']]></tspan><tspan x="44.0000"><![CDATA[s]]></tspan><tspan x="49.0000"><![CDATA[i]]></tspan><tspan x="52.0000"><![CDATA[l]]></tspan><tspan x="55.0000"><![CDATA[a]]></tspan><tspan x="62.0000"><![CDATA[ ]]></tspan><tspan x="66.0000"><![CDATA[s]]></tspan><tspan x="71.0000"><![CDATA[a]]></tspan><tspan x="78.0000"><![CDATA[n]]></tspan><tspan x="85.0000"><![CDATA[g]]></tspan><tspan x="91.0000"><![CDATA[ ]]></tspan></text>
 </g>
 <g transform="matrix(1.0020 0.0000 0.0000 1.0048 94.6163 174.7559)">
 </g>
@@ -173,7 +173,7 @@
 <g transform="matrix(1.0020 0.0000 0.0000 1.0048 198.4360 174.7559)">
 </g>
 <g transform="matrix(1.0020 0.0000 0.0000 1.0048 198.4360 174.7559)">
-<text fill="#000000" style ="white-space:pre;" font-weight="400" text-anchor="start" x="1.0000" y="12.0000" font-size="13.0000" ><![CDATA[EPU M'sila sang +]]></text>
+<text fill="#000000" style ="white-space:pre;" font-weight="400" text-anchor="start" x="1.0000" y="12.0000" font-size="13.0000" ><tspan x="1.0000"><![CDATA[E]]></tspan><tspan x="9.0000"><![CDATA[P]]></tspan><tspan x="16.0000"><![CDATA[U]]></tspan><tspan x="25.0000"><![CDATA[ ]]></tspan><tspan x="29.0000"><![CDATA[M]]></tspan><tspan x="41.0000"><![CDATA[']]></tspan><tspan x="43.0000"><![CDATA[s]]></tspan><tspan x="48.0000"><![CDATA[i]]></tspan><tspan x="51.0000"><![CDATA[l]]></tspan><tspan x="54.0000"><![CDATA[a]]></tspan><tspan x="61.0000"><![CDATA[ ]]></tspan><tspan x="65.0000"><![CDATA[s]]></tspan><tspan x="70.0000"><![CDATA[a]]></tspan><tspan x="77.0000"><![CDATA[n]]></tspan><tspan x="84.0000"><![CDATA[g]]></tspan><tspan x="90.0000"><![CDATA[ ]]></tspan><tspan x="92.0000"><![CDATA[+]]></tspan></text>
 </g>
 <g transform="matrix(0.0626 0.0000 0.0000 0.0628 0.0000 0.0000)">
 <path d="M 5896.0000,1512.0000 L 5896.0000,1624.0000 L 6008.0000,1624.0000 L 6008.0000,1512.0000 L 5896.0000,1512.0000 Z" stroke-width="1px" stroke="#4F81BD"  fill="#4F81BD" />
@@ -195,7 +195,7 @@
 <g transform="matrix(1.0020 0.0000 0.0000 1.0048 379.4975 90.8795)">
 </g>
 <g transform="matrix(1.0020 0.0000 0.0000 1.0048 379.4975 90.8795)">
-<text fill="#000000" style ="white-space:pre;" font-weight="400" text-anchor="start" x="0.0000" y="12.0000" font-size="13.0000" ><![CDATA[Moyenne Nbr d'œufs ]]></text>
+<text fill="#000000" style ="white-space:pre;" font-weight="400" text-anchor="start" x="0.0000" y="12.0000" font-size="13.0000" ><tspan x="0.0000"><![CDATA[M]]></tspan><tspan x="12.0000"><![CDATA[o]]></tspan><tspan x="19.0000"><![CDATA[y]]></tspan><tspan x="26.0000"><![CDATA[e]]></tspan><tspan x="32.0000"><![CDATA[n]]></tspan><tspan x="39.0000"><![CDATA[n]]></tspan><tspan x="46.0000"><![CDATA[e]]></tspan><tspan x="52.0000"><![CDATA[ ]]></tspan><tspan x="54.0000"><![CDATA[N]]></tspan><tspan x="63.0000"><![CDATA[b]]></tspan><tspan x="70.0000"><![CDATA[r]]></tspan><tspan x="74.0000"><![CDATA[ ]]></tspan><tspan x="77.0000"><![CDATA[d]]></tspan><tspan x="84.0000"><![CDATA[']]></tspan><tspan x="86.0000"><![CDATA[œ]]></tspan><tspan x="95.0000"><![CDATA[u]]></tspan><tspan x="102.0000"><![CDATA[f]]></tspan><tspan x="107.0000"><![CDATA[s]]></tspan><tspan x="112.0000"><![CDATA[ ]]></tspan></text>
 </g>
 <g transform="matrix(1.0020 0.0000 0.0000 1.0048 379.4975 105.9510)">
 </g>
@@ -212,7 +212,7 @@
 <g transform="matrix(1.0020 0.0000 0.0000 1.0048 379.4975 105.9510)">
 </g>
 <g transform="matrix(1.0020 0.0000 0.0000 1.0048 379.4975 105.9510)">
-<text fill="#000000" style ="white-space:pre;" font-weight="400" text-anchor="start" x="0.0000" y="13.0000" font-size="13.0000" ><![CDATA[pondus]]></text>
+<text fill="#000000" style ="white-space:pre;" font-weight="400" text-anchor="start" x="0.0000" y="13.0000" font-size="13.0000" ><tspan x="0.0000"><![CDATA[p]]></tspan><tspan x="7.0000"><![CDATA[o]]></tspan><tspan x="14.0000"><![CDATA[n]]></tspan><tspan x="21.0000"><![CDATA[d]]></tspan><tspan x="28.0000"><![CDATA[u]]></tspan><tspan x="35.0000"><![CDATA[s]]></tspan></text>
 </g>
 <g transform="matrix(0.0626 0.0000 0.0000 0.0628 0.0000 0.0000)">
 <path d="M 72.0000,80.0000 C 72.0000,76.0000 76.0000,72.0000 80.0000,72.0000 L 8080.0000,72.0000 C 8085.0000,72.0000 8088.0000,76.0000 8088.0000,80.0000 L 8088.0000,3296.0000 C 8088.0000,3301.0000 8085.0000,3304.0000 8080.0000,3304.0000 L 80.0000,3304.0000 C 76.0000,3304.0000 72.0000,3301.0000 72.0000,3296.0000 Z M 88.0000,3296.0000 L 80.0000,3288.0000 L 8080.0000,3288.0000 L 8072.0000,3296.0000 L 8072.0000,80.0000 L 8080.0000,88.0000 L 80.0000,88.0000 L 88.0000,80.0000 Z "  fill="#868686" stroke="#868686" stroke-width="1.0000"  stroke-linecap="butt"  stroke-linejoin="round" />
