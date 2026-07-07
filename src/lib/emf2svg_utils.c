@@ -1014,7 +1014,6 @@ void stroke_draw(drawingStates *states, FILE *out, bool *filled,
 void text_style_draw(FILE *out, drawingStates *states, POINT_D Org) {
     double font_height =
         fabs(scaleX(states, states->currentDeviceContext.font_height));
-    double font_width_scale = 1.0;
     if (states->currentDeviceContext.font_family != NULL) {
         fprintf(out, "font-family=\"%s\" ",
                 states->currentDeviceContext.font_family);
@@ -1030,28 +1029,12 @@ void text_style_draw(FILE *out, drawingStates *states, POINT_D Org) {
         orientation = 1;
     }
 
-    /* GDI lfWidth can request condensed glyphs, e.g. tall MathType brackets. */
-    if (states->currentDeviceContext.font_width != 0 && font_height > 0) {
-        font_width_scale =
-            fabs(scaleX(states, states->currentDeviceContext.font_width)) /
-            font_height;
-        font_width_scale = sqrt(sqrt(font_width_scale));
-    }
-
-    if (states->currentDeviceContext.font_escapement != 0 ||
-        fabs(font_width_scale - 1.0) > 0.01) {
+    if (states->currentDeviceContext.font_escapement != 0) {
         fprintf(out, "transform=\"");
-        if (fabs(font_width_scale - 1.0) > 0.01) {
-            fprintf(out, "translate(%.4f, 0) scale(%.4f, 1) "
-                         "translate(%.4f, 0) ",
-                    Org.x, font_width_scale, -Org.x);
-        }
-        if (states->currentDeviceContext.font_escapement != 0) {
-            fprintf(out, "rotate(%d, %.4f, %.4f) translate(0, %.4f)",
-                    (orientation *
-                     (int)states->currentDeviceContext.font_escapement / 10),
-                    Org.x, (Org.y + font_height * 0.9), font_height * 0.9);
-        }
+        fprintf(out, "rotate(%d, %.4f, %.4f) translate(0, %.4f)",
+                (orientation *
+                 (int)states->currentDeviceContext.font_escapement / 10),
+                Org.x, (Org.y + font_height * 0.9), font_height * 0.9);
         fprintf(out, "\" ");
     }
 
