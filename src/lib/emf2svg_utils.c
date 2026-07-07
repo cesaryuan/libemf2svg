@@ -826,6 +826,8 @@ void rectl_draw(drawingStates *states, FILE *out, U_RECTL rect) {
 }
 void restoreDeviceContext(drawingStates *states, int32_t index) {
     EMF_DEVICE_CONTEXT_STACK *stack_entry = states->DeviceContextStack;
+    EMF_DEVICE_CONTEXT_STACK *new_top;
+    EMF_DEVICE_CONTEXT_STACK *entry_to_free;
     // we recover the 'abs(index)' element of the stack
     // we stop if the index was outside the DeviceContextStack
     int i = -1;
@@ -845,6 +847,33 @@ void restoreDeviceContext(drawingStates *states, int32_t index) {
     states->currentDeviceContext = (EMF_DEVICE_CONTEXT){0};
     copyDeviceContext(&(states->currentDeviceContext),
                       &(stack_entry->DeviceContext));
+    /* SaveDC/RestoreDC also restores the mapping state used by point_cal(). */
+    states->viewPortOrgX = stack_entry->viewPortOrgX;
+    states->viewPortOrgY = stack_entry->viewPortOrgY;
+    states->viewPortExX = stack_entry->viewPortExX;
+    states->viewPortExY = stack_entry->viewPortExY;
+    states->viewPortExSet = stack_entry->viewPortExSet;
+    states->windowOrgX = stack_entry->windowOrgX;
+    states->windowOrgY = stack_entry->windowOrgY;
+    states->windowExX = stack_entry->windowExX;
+    states->windowExY = stack_entry->windowExY;
+    states->windowExSet = stack_entry->windowExSet;
+    states->MapMode = stack_entry->MapMode;
+    states->text_layout = stack_entry->text_layout;
+    /*
+     * RestoreDC consumes the restored save point and any newer save points.
+     * Leaving them on the stack makes repeated RestoreDC records restore the
+     * same mapping state, which pushes later WMF text outside the canvas.
+     */
+    new_top = stack_entry->previous;
+    entry_to_free = states->DeviceContextStack;
+    while (entry_to_free != new_top) {
+        EMF_DEVICE_CONTEXT_STACK *next = entry_to_free->previous;
+        freeDeviceContext(&(entry_to_free->DeviceContext));
+        free(entry_to_free);
+        entry_to_free = next;
+    }
+    states->DeviceContextStack = new_top;
 }
 void saveDeviceContext(drawingStates *states) {
     // create the new device context in the stack
@@ -852,6 +881,19 @@ void saveDeviceContext(drawingStates *states) {
         (EMF_DEVICE_CONTEXT_STACK *)calloc(1, sizeof(EMF_DEVICE_CONTEXT_STACK));
     copyDeviceContext(&(new_entry->DeviceContext),
                       &(states->currentDeviceContext));
+    /* SaveDC must preserve mapping state, not just selected GDI objects. */
+    new_entry->viewPortOrgX = states->viewPortOrgX;
+    new_entry->viewPortOrgY = states->viewPortOrgY;
+    new_entry->viewPortExX = states->viewPortExX;
+    new_entry->viewPortExY = states->viewPortExY;
+    new_entry->viewPortExSet = states->viewPortExSet;
+    new_entry->windowOrgX = states->windowOrgX;
+    new_entry->windowOrgY = states->windowOrgY;
+    new_entry->windowExX = states->windowExX;
+    new_entry->windowExY = states->windowExY;
+    new_entry->windowExSet = states->windowExSet;
+    new_entry->MapMode = states->MapMode;
+    new_entry->text_layout = states->text_layout;
     // put the new entry on the stack
     new_entry->previous = states->DeviceContextStack;
     states->DeviceContextStack = new_entry;
