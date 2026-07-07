@@ -1,0 +1,116 @@
+<?xml version="1.0"  encoding="UTF-8" standalone="no"?>
+<svg version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1276.0000" height="869.0000">
+<g transform="translate(-0.0000, -0.0000)">
+<text font-family="Tahoma" fill="#000000" style ="white-space:pre;" font-weight="400" text-anchor="start" x="381.0000" y="173.0700" font-size="32.3000" ><![CDATA[R1]]></text>
+<text font-family="Tahoma" fill="#000000" style ="white-space:pre;" font-weight="400" text-anchor="start" x="381.0000" y="236.0700" font-size="32.3000" ><![CDATA[2K]]></text>
+<path d="M 347.0000,246.0000 L 347.0000,259.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 319.0000,232.0000 L 347.0000,246.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 374.0000,204.0000 L 319.0000,232.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 319.0000,176.0000 L 374.0000,204.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 374.0000,148.0000 L 319.0000,176.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 347.0000,121.0000 L 347.0000,135.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 347.0000,135.0000 L 374.0000,148.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<text font-family="Tahoma" fill="#000000" style ="white-space:pre;" font-weight="400" text-anchor="start" x="1186.0000" y="173.0700" font-size="32.3000" ><![CDATA[R2]]></text>
+<text font-family="Tahoma" fill="#000000" style ="white-space:pre;" font-weight="400" text-anchor="start" x="1186.0000" y="236.0700" font-size="32.3000" ><![CDATA[2K]]></text>
+<path d="M 1151.0000,246.0000 L 1151.0000,259.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 1124.0000,232.0000 L 1151.0000,246.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 1179.0000,204.0000 L 1124.0000,232.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 1124.0000,176.0000 L 1179.0000,204.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 1179.0000,148.0000 L 1124.0000,176.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 1151.0000,121.0000 L 1151.0000,135.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 1151.0000,135.0000 L 1179.0000,148.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<text font-family="Tahoma" fill="#000000" style ="white-space:pre;" font-weight="400" text-anchor="start" x="520.0000" y="367.0700" font-size="32.3000" ><![CDATA[R3]]></text>
+<text font-family="Tahoma" fill="#000000" style ="white-space:pre;" font-weight="400" text-anchor="start" x="520.0000" y="430.0700" font-size="32.3000" ><![CDATA[101K]]></text>
+<path d="M 485.0000,440.0000 L 485.0000,454.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 458.0000,426.0000 L 485.0000,440.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 513.0000,398.0000 L 458.0000,426.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 458.0000,370.0000 L 513.0000,398.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 513.0000,343.0000 L 458.0000,370.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 485.0000,315.0000 L 485.0000,329.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 485.0000,329.0000 L 513.0000,343.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<text font-family="Tahoma" fill="#000000" style ="white-space:pre;" font-weight="400" text-anchor="start" x="964.0000" y="367.0700" font-size="32.3000" ><![CDATA[R4]]></text>
+<text font-family="Tahoma" fill="#000000" style ="white-space:pre;" font-weight="400" text-anchor="start" x="964.0000" y="430.0700" font-size="32.3000" ><![CDATA[100K]]></text>
+<path d="M 929.0000,440.0000 L 929.0000,454.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 902.0000,426.0000 L 929.0000,440.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 957.0000,398.0000 L 902.0000,426.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 902.0000,370.0000 L 957.0000,398.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 957.0000,343.0000 L 902.0000,370.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 929.0000,315.0000 L 929.0000,329.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 929.0000,329.0000 L 957.0000,343.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<text font-family="Tahoma" fill="#000000" style ="white-space:pre;" font-weight="400" text-anchor="middle" x="624.0000" y="509.0000" font-size="32.3000" ><![CDATA[C1]]></text>
+<text font-family="Tahoma" fill="#000000" style ="white-space:pre;" font-weight="400" text-anchor="middle" x="624.0000" y="594.0700" font-size="32.3000" ><![CDATA[.01µ]]></text>
+<path d="M 617.0000,537.0000 L 569.0000,537.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 631.0000,537.0000 L 680.0000,537.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 631.0000,509.0000 L 631.0000,565.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 617.0000,509.0000 L 617.0000,565.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<text font-family="Tahoma" fill="#000000" style ="white-space:pre;" font-weight="400" text-anchor="middle" x="846.0000" y="509.0000" font-size="32.3000" ><![CDATA[C2]]></text>
+<text font-family="Tahoma" fill="#000000" style ="white-space:pre;" font-weight="400" text-anchor="middle" x="846.0000" y="594.0700" font-size="32.3000" ><![CDATA[.01µ]]></text>
+<path d="M 839.0000,537.0000 L 791.0000,537.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 853.0000,537.0000 L 902.0000,537.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 853.0000,509.0000 L 853.0000,565.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 839.0000,509.0000 L 839.0000,565.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<text font-family="Tahoma" fill="#000000" style ="white-space:pre;" font-weight="400" text-anchor="start" x="111.0000" y="159.0700" font-size="32.3000" ><![CDATA[V1]]></text>
+<text font-family="Tahoma" fill="#000000" style ="white-space:pre;" font-weight="400" text-anchor="start" x="111.0000" y="298.0700" font-size="32.3000" ><![CDATA[5]]></text>
+<path d="M 55.0000,183.0000 L 83.0000,183.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 55.0000,252.0000 L 83.0000,252.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 69.0000,169.0000 L 69.0000,197.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 69.0000,287.0000 L 69.0000,273.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 69.0000,148.0000 L 69.0000,162.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<ellipse cx="69.5000" cy="217.5000" rx="55.5000" ry="55.5000" fill="none" stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round" />
+<text font-family="Tahoma" fill="#000000" style ="white-space:pre;" font-weight="400" text-anchor="start" x="1137.0000" y="520.0700" font-size="32.3000" ><![CDATA[Q1]]></text>
+<text font-family="Tahoma" fill="#000000" style ="white-space:pre;" font-weight="400" text-anchor="start" x="1137.0000" y="582.0700" font-size="32.3000" ><![CDATA[2N3904]]></text>
+<path d="M 1117.0000,585.0000 L 1103.0000,599.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 1151.0000,620.0000 L 1117.0000,585.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 1151.0000,620.0000 L 1103.0000,599.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 1110.0000,592.0000 L 1068.0000,565.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 1068.0000,592.0000 L 1068.0000,481.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 1068.0000,509.0000 L 1151.0000,454.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 1068.0000,537.0000 L 1040.0000,537.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<text font-family="Tahoma" fill="#000000" style ="white-space:pre;" font-weight="400" text-anchor="end" x="361.0000" y="520.0700" font-size="32.3000" ><![CDATA[Q2]]></text>
+<text font-family="Tahoma" fill="#000000" style ="white-space:pre;" font-weight="400" text-anchor="end" x="361.0000" y="582.0700" font-size="32.3000" ><![CDATA[2N3904]]></text>
+<path d="M 381.0000,585.0000 L 395.0000,599.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 347.0000,620.0000 L 381.0000,585.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 347.0000,620.0000 L 395.0000,599.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 388.0000,592.0000 L 430.0000,565.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 430.0000,592.0000 L 430.0000,481.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 430.0000,509.0000 L 347.0000,454.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 430.0000,537.0000 L 458.0000,537.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 1127.0000,648.0000 L 1176.0000,648.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 1176.0000,648.0000 L 1151.0000,672.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 1151.0000,672.0000 L 1127.0000,648.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 322.0000,648.0000 L 371.0000,648.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 371.0000,648.0000 L 347.0000,672.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 347.0000,672.0000 L 322.0000,648.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 45.0000,343.0000 L 93.0000,343.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 93.0000,343.0000 L 69.0000,367.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 69.0000,367.0000 L 45.0000,343.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<text font-family="Tahoma" fill="#000000" style ="white-space:pre;" font-weight="400" text-anchor="start" x="971.0000" y="742.0700" font-size="32.3000" ><![CDATA[.tran 25m startup]]></text>
+<text font-family="Tahoma" fill="#000000" style ="white-space:pre;" font-weight="400" text-anchor="middle" x="804.0000" y="778.1250" font-size="21.2500" ><![CDATA[This example schematic is supplied for informational/educational purposes only.]]></text>
+<path d="M 347.0000,93.0000 L 69.0000,93.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 1151.0000,93.0000 L 347.0000,93.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 347.0000,121.0000 L 347.0000,93.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 1151.0000,121.0000 L 1151.0000,93.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 69.0000,148.0000 L 69.0000,93.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 347.0000,287.0000 L 347.0000,259.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 485.0000,287.0000 L 347.0000,287.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 680.0000,287.0000 L 485.0000,287.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 929.0000,287.0000 L 791.0000,287.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 1151.0000,287.0000 L 1151.0000,259.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 1151.0000,287.0000 L 929.0000,287.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 485.0000,315.0000 L 485.0000,287.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 929.0000,315.0000 L 929.0000,287.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 69.0000,343.0000 L 69.0000,287.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 347.0000,454.0000 L 347.0000,287.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 1151.0000,454.0000 L 1151.0000,287.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 485.0000,537.0000 L 485.0000,454.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 485.0000,537.0000 L 458.0000,537.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 569.0000,537.0000 L 485.0000,537.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 680.0000,537.0000 L 791.0000,287.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 791.0000,537.0000 L 680.0000,287.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 929.0000,537.0000 L 929.0000,454.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 929.0000,537.0000 L 902.0000,537.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 1040.0000,537.0000 L 929.0000,537.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 347.0000,648.0000 L 347.0000,620.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+<path d="M 1151.0000,648.0000 L 1151.0000,620.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
+</g>
+</svg>

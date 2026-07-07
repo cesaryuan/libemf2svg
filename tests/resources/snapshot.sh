@@ -1,9 +1,9 @@
 #!/bin/sh
 #
-# Snapshot helper for the EMF-to-SVG converter.
+# Snapshot helper for the EMF and WMF to SVG converters.
 #
 # This script has two jobs:
-#   1. `save` converts the current EMF fixtures into SVG files and stores them
+#   1. `save` converts the current fixtures into SVG files and stores them
 #      as a snapshot baseline.
 #   2. `check` converts the same fixtures into a temporary output directory and
 #      compares the result with the saved baseline.
@@ -23,9 +23,13 @@ ABSPATH=$($RL -f "$(dirname "$0")")
 CALLER_PWD=`pwd -P`
 TEST_ROOT=$($RL -f "$ABSPATH/..")
 ACTION="$1"
-EMFDIR="$ABSPATH/emf"
-SNAPSHOT_DIR="$TEST_ROOT/snapshots/emf"
-WORKDIR="$TEST_ROOT/snapshot-out/emf"
+FORMAT="emf"
+EMFDIR=""
+SNAPSHOT_DIR=""
+WORKDIR=""
+INTERMEDIATE_DIR=""
+INPUT_EXT=""
+FORMAT_LABEL=""
 RESIZE_OPTS=""
 VERBOSE_OPT=""
 DETAIL_DIFF=""
@@ -54,22 +58,62 @@ absolute_path(){
     fi
 }
 
+# Configure format-specific inputs, outputs, and converter requirements.
+configure_format(){
+    case "$FORMAT" in
+        emf)
+            INPUT_EXT="emf"
+            FORMAT_LABEL="EMF"
+            DEFAULT_EMFDIR="$ABSPATH/emf"
+            DEFAULT_SNAPSHOT_DIR="$TEST_ROOT/snapshots/emf"
+            DEFAULT_WORKDIR="$TEST_ROOT/snapshot-out/emf"
+            ;;
+        wmf)
+            INPUT_EXT="wmf"
+            FORMAT_LABEL="WMF"
+            DEFAULT_EMFDIR="$ABSPATH/wmf"
+            DEFAULT_SNAPSHOT_DIR="$TEST_ROOT/snapshots/wmf"
+            DEFAULT_WORKDIR="$TEST_ROOT/snapshot-out/wmf"
+            INTERMEDIATE_DIR="$TEST_ROOT/snapshot-out/wmf-emf"
+            ;;
+        *)
+            printf "[snapshot] invalid format '%s'; expected 'emf' or 'wmf'\n" "$FORMAT" >&2
+            return 1
+            ;;
+    esac
+
+    if [ -z "$EMFDIR" ]
+    then
+        EMFDIR="$DEFAULT_EMFDIR"
+    fi
+    if [ -z "$SNAPSHOT_DIR" ]
+    then
+        SNAPSHOT_DIR="$DEFAULT_SNAPSHOT_DIR"
+    fi
+    if [ -z "$WORKDIR" ]
+    then
+        WORKDIR="$DEFAULT_WORKDIR"
+    fi
+}
+
 # Print command help for creating or checking SVG snapshots.
 help(){
+    configure_format || exit 1
     cat <<EOF
-usage: `basename "$0"` save|check [-h] [-e <emf dir>] [-d <snapshot dir>] [-o <work dir>] [-r] [-v] [--detail-diff <sample path>]
+usage: `basename "$0"` save|check [-h] [-e <input dir>] [-d <snapshot dir>] [-o <work dir>] [-r] [-v] [--format emf|wmf] [--detail-diff <sample path>]
 
-Create or compare SVG snapshots for emf2svg-conv.
+Create or compare SVG snapshots for emf2svg-conv and wmf2emf-conv.
 
 actions:
-  save   convert EMF files and overwrite the snapshot baseline
-  check  convert EMF files and compare them with the snapshot baseline
+  save   convert input files and overwrite the snapshot baseline
+  check  convert input files and compare them with the snapshot baseline
 
 arguments:
   -h: display this help
-  -e: alternate emf dir (default '$EMFDIR')
+  -e: alternate input dir (default '$EMFDIR')
   -d: snapshot dir (default '$SNAPSHOT_DIR')
   -o: temporary output dir for check (default '$WORKDIR')
+  --format: snapshot format, 'emf' or 'wmf' (default '$FORMAT')
   -r: resize to 800x600 before snapshotting
   -v: verbose converter output
   --detail-diff: print a unified diff for one changed sample
@@ -90,26 +134,54 @@ log_convert(){
     fi
 }
 
-# Convert every EMF file in the input directory into a matching SVG snapshot.
+# Convert one input file into a matching SVG snapshot.
+convert_snapshot(){
+    input="$1"
+    output="$2"
+    rel="$3"
+
+    if [ "$FORMAT" = "wmf" ]
+    then
+        emf_tmp="$INTERMEDIATE_DIR/$rel.emf"
+        mkdir -p "`dirname "$emf_tmp"`"
+        "$WMF2EMF_CMD" -i "$input" -o "$emf_tmp" $VERBOSE_OPT
+        tmpret=$?
+        if [ $tmpret -ne 0 ]
+        then
+            printf "[snapshot] ERROR: wmf2emf-conv failed on '%s'\n" "$input"
+            return $tmpret
+        fi
+        "$EMF2SVG_CMD" -p $RESIZE_OPTS -i "$emf_tmp" -o "$output" $VERBOSE_OPT
+        return $?
+    fi
+
+    "$EMF2SVG_CMD" -p $RESIZE_OPTS -i "$input" -o "$output" $VERBOSE_OPT
+}
+
+# Convert every input file into a matching SVG snapshot.
 generate_snapshots(){
     src_dir="$1"
     dst_dir="$2"
-    cmd="$3"
 
     rm -rf "$dst_dir"
     mkdir -p "$dst_dir"
+    if [ "$FORMAT" = "wmf" ]
+    then
+        rm -rf "$INTERMEDIATE_DIR"
+        mkdir -p "$INTERMEDIATE_DIR"
+    fi
 
-    for emf in `find "$src_dir" -type f -name "*.emf" | sort`
+    for emf in `find "$src_dir" -type f -name "*.$INPUT_EXT" | sort`
     do
         rel="${emf#$src_dir/}"
         svg="$dst_dir/$rel.svg"
         mkdir -p "`dirname "$svg"`"
         log_convert "$rel"
-        "$cmd" -p $RESIZE_OPTS -i "$emf" -o "$svg" $VERBOSE_OPT
+        convert_snapshot "$emf" "$svg" "$rel"
         tmpret=$?
         if [ $tmpret -ne 0 ]
         then
-            printf "[snapshot] ERROR: emf2svg-conv failed on '%s'\n" "$emf"
+            printf "[snapshot] ERROR: %s snapshot failed on '%s'\n" "$FORMAT_LABEL" "$emf"
             ret=1
         fi
     done
@@ -129,7 +201,7 @@ snapshot_relpath(){
         "$EMFDIR"/*)
             sample="${sample#$EMFDIR/}.svg"
             ;;
-        *.emf)
+        *.$INPUT_EXT)
             sample="$sample.svg"
             ;;
     esac
@@ -250,6 +322,16 @@ do
         fi
         WORKDIR="$1"
         ;;
+    --format)
+        shift
+        if [ $# -eq 0 ]
+        then
+            echo "Option --format requires an argument." >&2
+            help
+            exit 1
+        fi
+        FORMAT="$1"
+        ;;
     -r)
         RESIZE_OPTS="-w 800 -h 600"
         ;;
@@ -299,21 +381,30 @@ fi
 cd "$ABSPATH" || exit 1
 . ./colors.sh
 
-CMD="`$RL -f ../../build/emf2svg-conv`"
+configure_format || exit 1
+
+EMF2SVG_CMD="`$RL -f ../../build/emf2svg-conv`"
+WMF2EMF_CMD="`$RL -f ../../build/wmf2emf-conv`"
 EMFDIR="`absolute_path "$EMFDIR"`"
 SNAPSHOT_DIR="`absolute_path "$SNAPSHOT_DIR"`"
 WORKDIR="`absolute_path "$WORKDIR"`"
 
-if ! [ -x "$CMD" ]
+if ! [ -x "$EMF2SVG_CMD" ]
 then
-    printf "[%bFAIL%b] missing converter: %s\n" "$BRed" "$RCol" "$CMD"
+    printf "[%bFAIL%b] missing converter: %s\n" "$BRed" "$RCol" "$EMF2SVG_CMD"
     printf "Build it first, for example: cmake --build build --target emf2svg-conv\n"
+    exit 1
+fi
+if [ "$FORMAT" = "wmf" ] && ! [ -x "$WMF2EMF_CMD" ]
+then
+    printf "[%bFAIL%b] missing converter: %s\n" "$BRed" "$RCol" "$WMF2EMF_CMD"
+    printf "Build it first, for example: cmake --build build --target wmf2emf-conv\n"
     exit 1
 fi
 
 if ! [ -d "$EMFDIR" ]
 then
-    printf "[%bFAIL%b] missing EMF directory: %s\n" "$BRed" "$RCol" "$EMFDIR"
+    printf "[%bFAIL%b] missing %s directory: %s\n" "$BRed" "$RCol" "$FORMAT_LABEL" "$EMFDIR"
     exit 1
 fi
 EMFDIR="`cd "$EMFDIR" && pwd -P`"
@@ -321,7 +412,7 @@ EMFDIR="`cd "$EMFDIR" && pwd -P`"
 if [ "$ACTION" = "save" ]
 then
     log_info "saving snapshots to $SNAPSHOT_DIR"
-    generate_snapshots "$EMFDIR" "$SNAPSHOT_DIR" "$CMD"
+    generate_snapshots "$EMFDIR" "$SNAPSHOT_DIR"
     if [ $ret -ne 0 ]
     then
         printf "[%bFAIL%b] Snapshot save failed\n" "$BRed" "$RCol"
@@ -340,7 +431,7 @@ fi
 SNAPSHOT_DIR="`cd "$SNAPSHOT_DIR" && pwd -P`"
 
 log_info "checking snapshots against $SNAPSHOT_DIR"
-generate_snapshots "$EMFDIR" "$WORKDIR" "$CMD"
+generate_snapshots "$EMFDIR" "$WORKDIR"
 if [ $ret -ne 0 ]
 then
     printf "[%bFAIL%b] Snapshot generation failed\n" "$BRed" "$RCol"
@@ -348,7 +439,7 @@ then
 fi
 WORKDIR="`cd "$WORKDIR" && pwd -P`"
 
-CHANGED_LIST="$TEST_ROOT/snapshot-out/changed-files.txt"
+CHANGED_LIST="$TEST_ROOT/snapshot-out/$FORMAT-changed-files.txt"
 mkdir -p "`dirname "$CHANGED_LIST"`"
 if [ -n "$DETAIL_DIFF" ]
 then
