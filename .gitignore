@@ -37,6 +37,7 @@ emf2svg-conv
 # out directory
 out
 build
+tests/snapshot-out
 
 # test files
 tests/resources/tmp
