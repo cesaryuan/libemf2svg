@@ -80,7 +80,7 @@ typedef struct emf_graph_object {
     bool font_set;
     char *font_name;
     char *font_family;
-    uint32_t font_height;
+    int32_t font_height;
     uint32_t font_width;
     bool font_italic;
     bool font_underline;
@@ -135,7 +135,7 @@ typedef struct emf_device_context {
     bool font_set;
     char *font_name;
     char *font_family;
-    uint32_t font_height;
+    int32_t font_height;
     uint32_t font_width;
     bool font_italic;
     bool font_underline;
