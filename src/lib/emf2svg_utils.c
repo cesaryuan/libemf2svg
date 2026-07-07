@@ -1010,9 +1010,25 @@ void stroke_draw(drawingStates *states, FILE *out, bool *filled,
     }
 }
 
+/* Convert GDI LOGFONT height to the SVG em size used by font-size.
+ * Positive lfHeight is a cell height, while negative lfHeight is already the
+ * requested character height.  EMF does not carry TEXTMETRIC internal-leading
+ * data, so positive heights use a conservative cell-to-em approximation.
+ */
+static double svg_font_size_from_logfont_height(drawingStates *states) {
+    int32_t logical_height = states->currentDeviceContext.font_height;
+    double abs_height =
+        logical_height < 0 ? -(double)logical_height : (double)logical_height;
+    double font_height = fabs(scaleX(states, abs_height));
+
+    if (logical_height > 0) {
+        font_height *= 0.85;
+    }
+    return font_height;
+}
+
 void text_style_draw(FILE *out, drawingStates *states, POINT_D Org) {
-    double font_height =
-        fabs(scaleX(states, states->currentDeviceContext.font_height));
+    double font_height = svg_font_size_from_logfont_height(states);
     if (states->currentDeviceContext.font_family != NULL) {
         fprintf(out, "font-family=\"%s\" ",
                 states->currentDeviceContext.font_family);
