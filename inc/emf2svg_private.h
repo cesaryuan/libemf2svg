@@ -201,6 +201,18 @@ typedef struct emf_device_context {
 // Stack of EMF Device Contexts
 typedef struct dc_stack {
     EMF_DEVICE_CONTEXT DeviceContext;
+    double viewPortOrgX;
+    double viewPortOrgY;
+    double viewPortExX;
+    double viewPortExY;
+    bool viewPortExSet;
+    double windowOrgX;
+    double windowOrgY;
+    double windowExX;
+    double windowExY;
+    bool windowExSet;
+    uint16_t MapMode;
+    uint32_t text_layout;
     struct dc_stack *previous;
 } EMF_DEVICE_CONTEXT_STACK;
 
