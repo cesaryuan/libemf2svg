@@ -523,6 +523,25 @@ static int16_t wmf2emf_font_i16(const char *font, size_t offset) {
     return value;
 }
 
+/*
+ * todo: This is a hack to fix Equation/MathType WMFs that use positive cell heights
+ * Convert WMF positive cell heights to character-height EMF requests for the
+ * WMF->EMF->SVG path.  This keeps the fix scoped to WMF input because shrinking
+ * every positive EMF lfHeight makes native EMF text too small.
+ */
+static int16_t wmf2emf_font_height_for_svg(int16_t height) {
+    int32_t char_height;
+
+    if (height <= 0) {
+        return height;
+    }
+    char_height = ((int32_t)height * 85 + 50) / 100;
+    if (char_height <= 0) {
+        char_height = 1;
+    }
+    return (int16_t)-char_height;
+}
+
 /* Read an unaligned byte field from a WMF font object. */
 static uint8_t wmf2emf_font_u8(const char *font, size_t offset) {
     return (uint8_t)*(const unsigned char *)(font + offset);
@@ -704,7 +723,8 @@ static int wmf2emf_create_font(wmf2emfOutput *output, wmf2emfHandleMap *map,
         return 0;
     }
     logfont = logfont_set(
-        wmf2emf_font_i16(font_data, offsetof(U_FONT, Height)),
+        wmf2emf_font_height_for_svg(
+            wmf2emf_font_i16(font_data, offsetof(U_FONT, Height))),
         wmf2emf_font_i16(font_data, offsetof(U_FONT, Width)),
         wmf2emf_font_i16(font_data, offsetof(U_FONT, Escapement)),
         wmf2emf_font_i16(font_data, offsetof(U_FONT, Orientation)),
