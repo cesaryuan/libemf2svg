@@ -1532,93 +1532,149 @@ static int utf8_append_codepoint(char *out, size_t capacity, size_t *offset,
     return 1;
 }
 
-/* Map Symbol bytes to Windows Symbol PUA code points for faithful rendering. */
-static uint32_t symbol_codepoint(unsigned char code) {
-    if ((code >= 0x20 && code <= 0x7E) ||
-        (code >= 0xA1 && code <= 0xEF) ||
-        (code >= 0xF1 && code <= 0xFE)) {
-        return 0xF000U + code;
+typedef struct symbol_cmap_range {
+    unsigned char first;
+    unsigned char last;
+} symbol_cmap_range;
+
+typedef enum symbol_cmap_match {
+    SYMBOL_CMAP_EXACT,
+    SYMBOL_CMAP_PREFIX
+} symbol_cmap_match;
+
+typedef struct symbol_cmap_font {
+    const char *family;
+    symbol_cmap_match match;
+    const symbol_cmap_range *ranges;
+    size_t range_count;
+} symbol_cmap_font;
+
+static const symbol_cmap_range windows_symbol_ranges[] = {
+    {0x20, 0x7E}, {0xA1, 0xEF}, {0xF1, 0xFE}};
+
+static const symbol_cmap_range mt_extra_ranges[] = {
+    {0x20, 0x7E}, {0x80, 0xFF}};
+
+static const symbol_cmap_range euclid_math_two_ranges[] = {
+    {0x20, 0x2C}, {0x41, 0x5A}, {0x6B, 0x6B}, {0x80, 0xAB},
+    {0xB0, 0xCB}, {0xD0, 0xE5}, {0xF0, 0xF5}};
+
+static const symbol_cmap_range euclid_math_one_ranges[] = {
+    {0x20, 0x2D}, {0x30, 0x39}, {0x41, 0x5A}, {0x80, 0x8D},
+    {0x90, 0x99}, {0xA0, 0xAE}, {0xB0, 0xD3}, {0xE0, 0xEA},
+    {0xF0, 0xFF}};
+
+/*
+ * Fonts with Windows platformID=3, encodingID=0 symbol cmaps often map
+ * single-byte record data to PUA code points as F000+byte.  MathType fonts
+ * keep narrower per-font ranges to avoid remapping bytes they do not encode.
+ */
+static const symbol_cmap_font symbol_cmap_fonts[] = {
+    {"Symbol", SYMBOL_CMAP_EXACT, windows_symbol_ranges,
+     sizeof(windows_symbol_ranges) / sizeof(windows_symbol_ranges[0])},
+    {"Wingdings", SYMBOL_CMAP_PREFIX, windows_symbol_ranges,
+     sizeof(windows_symbol_ranges) / sizeof(windows_symbol_ranges[0])},
+    {"Webdings", SYMBOL_CMAP_EXACT, windows_symbol_ranges,
+     sizeof(windows_symbol_ranges) / sizeof(windows_symbol_ranges[0])},
+    {"Marlett", SYMBOL_CMAP_EXACT, windows_symbol_ranges,
+     sizeof(windows_symbol_ranges) / sizeof(windows_symbol_ranges[0])},
+    {"MT Extra", SYMBOL_CMAP_EXACT, mt_extra_ranges,
+     sizeof(mt_extra_ranges) / sizeof(mt_extra_ranges[0])},
+    {"Euclid Math Two", SYMBOL_CMAP_EXACT, euclid_math_two_ranges,
+     sizeof(euclid_math_two_ranges) / sizeof(euclid_math_two_ranges[0])},
+    {"Euclid Math One", SYMBOL_CMAP_EXACT, euclid_math_one_ranges,
+     sizeof(euclid_math_one_ranges) / sizeof(euclid_math_one_ranges[0])}};
+
+/* Return an ASCII-lowercase byte for case-insensitive font-family matching. */
+static unsigned char ascii_lower(unsigned char c) {
+    if (c >= 'A' && c <= 'Z') {
+        return (unsigned char)(c + ('a' - 'A'));
+    }
+    return c;
+}
+
+/* Compare font-family names without depending on platform strcasecmp APIs. */
+static bool font_family_equals(const char *family, const char *expected) {
+    size_t i;
+
+    if (family == NULL || expected == NULL) {
+        return false;
+    }
+    for (i = 0; family[i] != '\0' && expected[i] != '\0'; i++) {
+        if (ascii_lower((unsigned char)family[i]) !=
+            ascii_lower((unsigned char)expected[i])) {
+            return false;
+        }
+    }
+    return family[i] == '\0' && expected[i] == '\0';
+}
+
+/* Match font-family prefixes for numbered legacy symbol families. */
+static bool font_family_starts_with(const char *family, const char *prefix) {
+    size_t i;
+
+    if (family == NULL || prefix == NULL) {
+        return false;
+    }
+    for (i = 0; prefix[i] != '\0'; i++) {
+        if (family[i] == '\0' ||
+            ascii_lower((unsigned char)family[i]) !=
+                ascii_lower((unsigned char)prefix[i])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/* Return the symbol-cmap rule for the current font family, if one is known. */
+static const symbol_cmap_font *find_symbol_cmap_font(drawingStates *states) {
+    const char *family;
+    size_t i;
+
+    if (states == NULL) {
+        return NULL;
+    }
+
+    family = states->currentDeviceContext.font_family;
+    for (i = 0; i < sizeof(symbol_cmap_fonts) / sizeof(symbol_cmap_fonts[0]);
+         i++) {
+        if (symbol_cmap_fonts[i].match == SYMBOL_CMAP_PREFIX &&
+            font_family_starts_with(family, symbol_cmap_fonts[i].family)) {
+            return &symbol_cmap_fonts[i];
+        }
+        if (symbol_cmap_fonts[i].match == SYMBOL_CMAP_EXACT &&
+            font_family_equals(family, symbol_cmap_fonts[i].family)) {
+            return &symbol_cmap_fonts[i];
+        }
+    }
+    return NULL;
+}
+
+/* Map one symbol-cmap byte through the font's F000+byte PUA ranges. */
+static uint32_t symbol_cmap_codepoint(unsigned char code,
+                                      const symbol_cmap_font *font) {
+    size_t i;
+
+    if (font == NULL) {
+        return code;
+    }
+    for (i = 0; i < font->range_count; i++) {
+        if (code >= font->ranges[i].first && code <= font->ranges[i].last) {
+            return 0xF000U + code;
+        }
     }
     return code;
 }
 
-/* Map MT Extra bytes to its MathType PUA cmap, fixing blackboard glyph loss. */
-static uint32_t mt_extra_codepoint(unsigned char code) {
-    if (code >= 0x20 && code != 0x7F) {
-        return 0xF000U + code;
-    }
-    return code;
-}
-
-/* Map Euclid Math Two bytes to its MathType PUA cmap for large operators. */
-static uint32_t euclid_math_two_codepoint(unsigned char code) {
-    if ((code >= 0x20 && code <= 0x2C) ||
-        (code >= 0x41 && code <= 0x5A) ||
-        code == 0x6B ||
-        (code >= 0x80 && code <= 0xAB) ||
-        (code >= 0xB0 && code <= 0xCB) ||
-        (code >= 0xD0 && code <= 0xE5) ||
-        (code >= 0xF0 && code <= 0xF5)) {
-        return 0xF000U + code;
-    }
-    return code;
-}
-
-/* Map Euclid Math One bytes to its MathType PUA cmap, fixing glyph-code loss. */
-static uint32_t euclid_math_one_codepoint(unsigned char code) {
-    if ((code >= 0x20 && code <= 0x2D) ||
-        (code >= 0x30 && code <= 0x39) ||
-        (code >= 0x41 && code <= 0x5A) ||
-        (code >= 0x80 && code <= 0x8D) ||
-        (code >= 0x90 && code <= 0x99) ||
-        (code >= 0xA0 && code <= 0xAE) ||
-        (code >= 0xB0 && code <= 0xD3) ||
-        (code >= 0xE0 && code <= 0xEA) ||
-        (code >= 0xF0 && code <= 0xFF)) {
-        return 0xF000U + code;
-    }
-    return code;
-}
-
-/* Return true for Symbol-font text whose bytes need Symbol encoding, not ASCII. */
-static bool is_symbol_text(drawingStates *states) {
-    return states != NULL &&
-           states->currentDeviceContext.font_family != NULL &&
-           strcmp(states->currentDeviceContext.font_family, "Symbol") == 0;
-}
-
-/* Return true for MT Extra text whose bytes are font-specific glyph codes. */
-static bool is_mt_extra_text(drawingStates *states) {
-    return states != NULL &&
-           states->currentDeviceContext.font_family != NULL &&
-           strcmp(states->currentDeviceContext.font_family, "MT Extra") == 0;
-}
-
-/* Return true for Euclid Math Two glyph-encoded operator text. */
-static bool is_euclid_math_two_text(drawingStates *states) {
-    return states != NULL &&
-           states->currentDeviceContext.font_family != NULL &&
-           strcmp(states->currentDeviceContext.font_family,
-                  "Euclid Math Two") == 0;
-}
-
-/* Return true for Euclid Math One glyph-encoded operator text. */
-static bool is_euclid_math_one_text(drawingStates *states) {
-    return states != NULL &&
-           states->currentDeviceContext.font_family != NULL &&
-           strcmp(states->currentDeviceContext.font_family,
-                  "Euclid Math One") == 0;
-}
-
-/* Convert font-specific single-byte text to UTF-8 for SVG output. */
-static int encoded_font_to_utf8(char *in, size_t size_in, char **out,
-                                size_t *out_len,
-                                uint32_t (*codepoint)(unsigned char)) {
+/* Convert symbol-cmap single-byte text to UTF-8 for SVG output. */
+static int symbol_cmap_text_to_utf8(char *in, size_t size_in, char **out,
+                                    size_t *out_len,
+                                    const symbol_cmap_font *font) {
     size_t capacity = size_in * 4 + 1;
     size_t offset = 0;
     size_t i;
 
-    if (codepoint == NULL) {
+    if (font == NULL) {
         return 1;
     }
     *out = (char *)calloc(capacity, 1);
@@ -1627,7 +1683,8 @@ static int encoded_font_to_utf8(char *in, size_t size_in, char **out,
     }
     for (i = 0; i < size_in; i++) {
         if (!utf8_append_codepoint(*out, capacity, &offset,
-                                   codepoint((unsigned char)in[i]))) {
+                                   symbol_cmap_codepoint((unsigned char)in[i],
+                                                         font))) {
             free(*out);
             *out = NULL;
             return 1;
@@ -1782,6 +1839,7 @@ void reverse_utf8(char *in, size_t size_in) {
 void text_convert(char *in, size_t size_in, char **out, size_t *size_out,
                   uint8_t type, drawingStates *states) {
     uint8_t *string;
+    const symbol_cmap_font *symbol_font;
     int ret = 0;
 
     switch (type) {
@@ -1848,24 +1906,9 @@ void text_convert(char *in, size_t size_in, char **out, size_t *size_out,
                           (uintptr_t)((uintptr_t)in + (uintptr_t)size_in))) {
             string = NULL;
         }
-        else if (is_symbol_text(states)) {
-            ret = encoded_font_to_utf8(in, size_in, (char **)&string, size_out,
-                                       symbol_codepoint);
-            type = UTF_16;
-        }
-        else if (is_mt_extra_text(states)) {
-            ret = encoded_font_to_utf8(in, size_in, (char **)&string, size_out,
-                                       mt_extra_codepoint);
-            type = UTF_16;
-        }
-        else if (is_euclid_math_two_text(states)) {
-            ret = encoded_font_to_utf8(in, size_in, (char **)&string, size_out,
-                                       euclid_math_two_codepoint);
-            type = UTF_16;
-        }
-        else if (is_euclid_math_one_text(states)) {
-            ret = encoded_font_to_utf8(in, size_in, (char **)&string, size_out,
-                                       euclid_math_one_codepoint);
+        else if ((symbol_font = find_symbol_cmap_font(states)) != NULL) {
+            ret = symbol_cmap_text_to_utf8(in, size_in, (char **)&string,
+                                           size_out, symbol_font);
             type = UTF_16;
         }
         else if (text_charset_encoding(states) != NULL) {
