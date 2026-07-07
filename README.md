@@ -438,6 +438,9 @@ $ ./tests/resources/snapshot.sh save
 
 # On another branch, regenerate SVGs and compare them with the baseline.
 $ ./tests/resources/snapshot.sh check
+
+# Show the full diff for one changed sample.
+$ ./tests/resources/snapshot.sh check --detail-diff test-000.emf.svg
 ```
 
 The default baseline lives in `tests/snapshots/emf/`, and temporary comparison

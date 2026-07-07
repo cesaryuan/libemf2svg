@@ -153,11 +153,14 @@ compare_snapshots(){
     actual_dir="$2"
     detail_rel="$3"
     ret=0
+    total_count=0
+    changed_count=0
 
     : > "$CHANGED_LIST"
 
     for expected in `find "$expected_dir" -type f -name "*.svg" | sort`
     do
+        total_count=$((total_count + 1))
         rel="${expected#$expected_dir/}"
         actual="$actual_dir/$rel"
         if ! [ -f "$actual" ]
@@ -179,24 +182,31 @@ compare_snapshots(){
         expected="$expected_dir/$rel"
         if ! [ -f "$expected" ]
         then
+            total_count=$((total_count + 1))
             record_changed "$rel"
             ret=1
         fi
     done
 
+    sort -u "$CHANGED_LIST" > "$CHANGED_LIST.sorted"
+    changed_count=`wc -l < "$CHANGED_LIST.sorted" | tr -d ' '`
+
     if [ $ret -ne 0 ]
     then
-        sort -u "$CHANGED_LIST"
+        cat "$CHANGED_LIST.sorted"
+        log_info "changed: $changed_count / $total_count"
         if [ -n "$detail_rel" ]
         then
             printf "\n"
-            if grep -qx "$detail_rel" "$CHANGED_LIST"
+            if grep -qx "$detail_rel" "$CHANGED_LIST.sorted"
             then
                 diff -u "$expected_dir/$detail_rel" "$actual_dir/$detail_rel"
             else
                 printf "[snapshot] '%s' is not in the changed snapshot list\n" "$detail_rel"
             fi
         fi
+    else
+        log_info "changed: 0 / $total_count"
     fi
 
     return $ret
@@ -327,6 +337,7 @@ then
     printf "Create it first with: ./tests/resources/snapshot.sh save\n"
     exit 1
 fi
+SNAPSHOT_DIR="`cd "$SNAPSHOT_DIR" && pwd -P`"
 
 log_info "checking snapshots against $SNAPSHOT_DIR"
 generate_snapshots "$EMFDIR" "$WORKDIR" "$CMD"
@@ -335,8 +346,16 @@ then
     printf "[%bFAIL%b] Snapshot generation failed\n" "$BRed" "$RCol"
     exit $ret
 fi
+WORKDIR="`cd "$WORKDIR" && pwd -P`"
 
-diff -ru "$SNAPSHOT_DIR" "$WORKDIR"
+CHANGED_LIST="$TEST_ROOT/snapshot-out/changed-files.txt"
+mkdir -p "`dirname "$CHANGED_LIST"`"
+if [ -n "$DETAIL_DIFF" ]
+then
+    DETAIL_DIFF="`snapshot_relpath "$DETAIL_DIFF"`"
+fi
+
+compare_snapshots "$SNAPSHOT_DIR" "$WORKDIR" "$DETAIL_DIFF"
 ret=$?
 if [ $ret -ne 0 ]
 then
