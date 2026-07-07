@@ -1648,8 +1648,14 @@ static const char *text_charset_encoding(drawingStates *states) {
     switch (states->currentDeviceContext.font_charset) {
     case U_ANSI_CHARSET:
         return "CP1252";
+    case U_SHIFTJIS_CHARSET:
+        return "CP932";
+    case U_HANGUL_CHARSET:
+        return "CP949";
     case U_GB2312_CHARSET:
         return "CP936";
+    case U_CHINESEBIG5_CHARSET:
+        return "CP950";
     default:
         return NULL;
     }
@@ -1657,8 +1663,19 @@ static const char *text_charset_encoding(drawingStates *states) {
 
 /* Return true when ExtTextOutA bytes must be decoded as a whole string. */
 static bool text_charset_is_multibyte(drawingStates *states) {
-    return states != NULL &&
-           states->currentDeviceContext.font_charset == U_GB2312_CHARSET;
+    if (states == NULL) {
+        return false;
+    }
+
+    switch (states->currentDeviceContext.font_charset) {
+    case U_SHIFTJIS_CHARSET:
+    case U_HANGUL_CHARSET:
+    case U_GB2312_CHARSET:
+    case U_CHINESEBIG5_CHARSET:
+        return true;
+    default:
+        return false;
+    }
 }
 
 /* Convert ExtTextOutA bytes through the current charset code page. */
