@@ -38,6 +38,7 @@ emf2svg-conv
 out
 build
 build-wasm
+tests/snapshot-out
 
 # test files
 tests/resources/tmp

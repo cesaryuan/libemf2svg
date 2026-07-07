@@ -466,6 +466,27 @@ tests/out/test-000.emf.svg  tests/out/test-051.emf.svg
 
 The emf files used for these checks are located in [./tests/resources/emf/](https://github.com/kakwa/libemf2svg/blob/master/tests/resources/emf/).
 
+* Check SVG snapshots against the current baseline:
+
+```bash
+# Save the current converter output as the baseline.
+$ ./tests/resources/snapshot.sh save
+
+# On another branch, regenerate SVGs and compare them with the baseline.
+$ ./tests/resources/snapshot.sh check
+
+# Show the full diff for one changed sample.
+$ ./tests/resources/snapshot.sh check --detail-diff test-000.emf.svg
+
+# Run the same snapshot workflow for WMF inputs via wmf2emf-conv + emf2svg-conv.
+$ ./tests/resources/snapshot.sh save --format wmf
+$ ./tests/resources/snapshot.sh check --format wmf
+```
+
+The default EMF baseline lives in `tests/snapshots/emf/`; WMF baselines live in
+`tests/snapshots/wmf/`. Temporary comparison output goes under
+`tests/snapshot-out/`.
+
 Useful Commands
 ---------------
 

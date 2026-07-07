@@ -275,7 +275,6 @@ void endFormDraw(drawingStates *states, FILE *out) {
         bool stroked = false;
         stroke_draw(states, out, &filled, &stroked);
         fill_draw(states, out, &filled, &stroked);
-        clipset_draw(states, out);
         if (!filled)
             fprintf(out, "fill=\"none\" ");
         if (!stroked)
@@ -442,6 +441,20 @@ void lineto_draw(const char *name, const char *field1, const char *field2,
     UNUSED(name);
     PU_EMRGENERICPAIR pEmr = (PU_EMRGENERICPAIR)(contents);
     startPathDraw(states, out);
+
+    // Some EMFs move the current point before BEGINPATH and start the path
+    // itself with a LINETO. Seed that missing move so dashed paths like
+    // test-014.emf do not serialize as an invalid SVG path that starts with L.
+    if (states->inPath && states->currentPath == NULL) {
+        U_POINT current_point;
+        current_point.x = states->cur_x;
+        current_point.y = states->cur_y;
+        fprintf(out, "M ");
+        point_draw(states, current_point, out);
+        addNewSegPath(states, SEG_MOVE);
+        pointCurrPathAdd(states, current_point, 0);
+    }
+
     fprintf(out, "L ");
     point_draw(states, pEmr->pair, out);
     addNewSegPath(states, SEG_LINE);
@@ -830,6 +843,8 @@ void rectl_draw(drawingStates *states, FILE *out, U_RECTL rect) {
 }
 void restoreDeviceContext(drawingStates *states, int32_t index) {
     EMF_DEVICE_CONTEXT_STACK *stack_entry = states->DeviceContextStack;
+    EMF_DEVICE_CONTEXT_STACK *new_top;
+    EMF_DEVICE_CONTEXT_STACK *entry_to_free;
     // we recover the 'abs(index)' element of the stack
     // we stop if the index was outside the DeviceContextStack
     int i = -1;
@@ -849,6 +864,33 @@ void restoreDeviceContext(drawingStates *states, int32_t index) {
     states->currentDeviceContext = (EMF_DEVICE_CONTEXT){0};
     copyDeviceContext(&(states->currentDeviceContext),
                       &(stack_entry->DeviceContext));
+    /* SaveDC/RestoreDC also restores the mapping state used by point_cal(). */
+    states->viewPortOrgX = stack_entry->viewPortOrgX;
+    states->viewPortOrgY = stack_entry->viewPortOrgY;
+    states->viewPortExX = stack_entry->viewPortExX;
+    states->viewPortExY = stack_entry->viewPortExY;
+    states->viewPortExSet = stack_entry->viewPortExSet;
+    states->windowOrgX = stack_entry->windowOrgX;
+    states->windowOrgY = stack_entry->windowOrgY;
+    states->windowExX = stack_entry->windowExX;
+    states->windowExY = stack_entry->windowExY;
+    states->windowExSet = stack_entry->windowExSet;
+    states->MapMode = stack_entry->MapMode;
+    states->text_layout = stack_entry->text_layout;
+    /*
+     * RestoreDC consumes the restored save point and any newer save points.
+     * Leaving them on the stack makes repeated RestoreDC records restore the
+     * same mapping state, which pushes later WMF text outside the canvas.
+     */
+    new_top = stack_entry->previous;
+    entry_to_free = states->DeviceContextStack;
+    while (entry_to_free != new_top) {
+        EMF_DEVICE_CONTEXT_STACK *next = entry_to_free->previous;
+        freeDeviceContext(&(entry_to_free->DeviceContext));
+        free(entry_to_free);
+        entry_to_free = next;
+    }
+    states->DeviceContextStack = new_top;
 }
 void saveDeviceContext(drawingStates *states) {
     // create the new device context in the stack
@@ -856,6 +898,19 @@ void saveDeviceContext(drawingStates *states) {
         (EMF_DEVICE_CONTEXT_STACK *)calloc(1, sizeof(EMF_DEVICE_CONTEXT_STACK));
     copyDeviceContext(&(new_entry->DeviceContext),
                       &(states->currentDeviceContext));
+    /* SaveDC must preserve mapping state, not just selected GDI objects. */
+    new_entry->viewPortOrgX = states->viewPortOrgX;
+    new_entry->viewPortOrgY = states->viewPortOrgY;
+    new_entry->viewPortExX = states->viewPortExX;
+    new_entry->viewPortExY = states->viewPortExY;
+    new_entry->viewPortExSet = states->viewPortExSet;
+    new_entry->windowOrgX = states->windowOrgX;
+    new_entry->windowOrgY = states->windowOrgY;
+    new_entry->windowExX = states->windowExX;
+    new_entry->windowExY = states->windowExY;
+    new_entry->windowExSet = states->windowExSet;
+    new_entry->MapMode = states->MapMode;
+    new_entry->text_layout = states->text_layout;
     // put the new entry on the stack
     new_entry->previous = states->DeviceContextStack;
     states->DeviceContextStack = new_entry;
@@ -973,13 +1028,86 @@ void stroke_draw(drawingStates *states, FILE *out, bool *filled,
     }
 }
 
+/*
+ * Convert GDI LOGFONT height to SVG font-size while preserving signed height
+ * semantics.  A global cell-to-em shrink for positive lfHeight makes EMF Dx
+ * advances too loose, so both signs use the requested logical height here.
+ */
+static double svg_font_size_from_logfont_height(drawingStates *states) {
+    int32_t logical_height = states->currentDeviceContext.font_height;
+    double abs_height =
+        logical_height < 0 ? -(double)logical_height : (double)logical_height;
+
+    return fabs(scaleX(states, abs_height));
+}
+
+/* Return true when a CSS font-family name needs string quoting in SVG. */
+static bool svg_font_family_needs_quotes(const char *family) {
+    size_t i;
+    bool token_start = true;
+
+    if (family == NULL || family[0] == '\0') {
+        return false;
+    }
+    for (i = 0; family[i] != '\0'; i++) {
+        unsigned char c = (unsigned char)family[i];
+
+        if (c == ' ') {
+            token_start = true;
+            continue;
+        }
+        if (token_start && c >= '0' && c <= '9') {
+            return true;
+        }
+        if (!(c == '-' || c == '_' || (c >= '0' && c <= '9') ||
+              (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+              c >= 0x80)) {
+            return true;
+        }
+        token_start = false;
+    }
+    return false;
+}
+
+/* Emit a font-family attribute, quoting names like "Wingdings 2" for CSS. */
+static void svg_font_family_draw(FILE *out, const char *family) {
+    const char *p;
+
+    if (family == NULL) {
+        return;
+    }
+    if (!svg_font_family_needs_quotes(family)) {
+        fprintf(out, "font-family=\"%s\" ", family);
+        return;
+    }
+
+    fprintf(out, "font-family=\"&quot;");
+    for (p = family; *p != '\0'; p++) {
+        switch (*p) {
+        case '&':
+            fprintf(out, "&amp;");
+            break;
+        case '<':
+            fprintf(out, "&lt;");
+            break;
+        case '"':
+            fprintf(out, "\\&quot;");
+            break;
+        case '\\':
+            fprintf(out, "\\\\");
+            break;
+        default:
+            fputc(*p, out);
+            break;
+        }
+    }
+    fprintf(out, "&quot;\" ");
+}
+
 void text_style_draw(FILE *out, drawingStates *states, POINT_D Org) {
-    double font_height =
-        fabs(scaleX(states, states->currentDeviceContext.font_height));
-    double font_width_scale = 1.0;
+    double font_height = svg_font_size_from_logfont_height(states);
     if (states->currentDeviceContext.font_family != NULL) {
-        fprintf(out, "font-family=\"%s\" ",
-                states->currentDeviceContext.font_family);
+        svg_font_family_draw(out, states->currentDeviceContext.font_family);
     }
     fprintf(out, "fill=\"#%02X%02X%02X\" ",
             states->currentDeviceContext.text_red,
@@ -992,28 +1120,12 @@ void text_style_draw(FILE *out, drawingStates *states, POINT_D Org) {
         orientation = 1;
     }
 
-    /* GDI lfWidth can request condensed glyphs, e.g. tall MathType brackets. */
-    if (states->currentDeviceContext.font_width != 0 && font_height > 0) {
-        font_width_scale =
-            fabs(scaleX(states, states->currentDeviceContext.font_width)) /
-            font_height;
-        font_width_scale = sqrt(sqrt(font_width_scale));
-    }
-
-    if (states->currentDeviceContext.font_escapement != 0 ||
-        fabs(font_width_scale - 1.0) > 0.01) {
+    if (states->currentDeviceContext.font_escapement != 0) {
         fprintf(out, "transform=\"");
-        if (fabs(font_width_scale - 1.0) > 0.01) {
-            fprintf(out, "translate(%.4f, 0) scale(%.4f, 1) "
-                         "translate(%.4f, 0) ",
-                    Org.x, font_width_scale, -Org.x);
-        }
-        if (states->currentDeviceContext.font_escapement != 0) {
-            fprintf(out, "rotate(%d, %.4f, %.4f) translate(0, %.4f)",
-                    (orientation *
-                     (int)states->currentDeviceContext.font_escapement / 10),
-                    Org.x, (Org.y + font_height * 0.9), font_height * 0.9);
-        }
+        fprintf(out, "rotate(%d, %.4f, %.4f) translate(0, %.4f)",
+                (orientation *
+                 (int)states->currentDeviceContext.font_escapement / 10),
+                Org.x, (Org.y + font_height * 0.9), font_height * 0.9);
         fprintf(out, "\" ");
     }
 
@@ -1515,93 +1627,220 @@ static int utf8_append_codepoint(char *out, size_t capacity, size_t *offset,
     return 1;
 }
 
-/* Map Symbol bytes to Windows Symbol PUA code points for faithful rendering. */
-static uint32_t symbol_codepoint(unsigned char code) {
-    if ((code >= 0x20 && code <= 0x7E) ||
-        (code >= 0xA1 && code <= 0xEF) ||
-        (code >= 0xF1 && code <= 0xFE)) {
-        return 0xF000U + code;
+typedef struct symbol_cmap_range {
+    unsigned char first;
+    unsigned char last;
+} symbol_cmap_range;
+
+typedef enum symbol_cmap_match {
+    SYMBOL_CMAP_EXACT,
+    SYMBOL_CMAP_PREFIX
+} symbol_cmap_match;
+
+typedef enum symbol_cmap_charset_rule {
+    SYMBOL_CMAP_SYMBOLISH_CHARSET,
+    SYMBOL_CMAP_ANY_CHARSET
+} symbol_cmap_charset_rule;
+
+typedef struct symbol_cmap_font {
+    const char *family;
+    symbol_cmap_match match;
+    symbol_cmap_charset_rule charset_rule;
+    const symbol_cmap_range *ranges;
+    size_t range_count;
+} symbol_cmap_font;
+
+static const symbol_cmap_range symbol_ranges[] = {{0x20, 0xFF}};
+
+static const symbol_cmap_range wingdings_ranges[] = {
+    {0x20, 0x7E}, {0x80, 0xFF}};
+
+static const symbol_cmap_range wingdings_2_ranges[] = {
+    {0x20, 0x7E}, {0x80, 0xF9}};
+
+static const symbol_cmap_range wingdings_3_ranges[] = {
+    {0x20, 0x7E}, {0x80, 0xF0}};
+
+static const symbol_cmap_range marlett_ranges[] = {
+    {0x30, 0x39}, {0x57, 0x57}, {0x61, 0x79}, {0xA1, 0xA3}};
+
+static const symbol_cmap_range ms_reference_specialty_ranges[] = {
+    {0x20, 0x20}, {0x23, 0xCB}};
+
+static const symbol_cmap_range ms_outlook_ranges[] = {
+    {0x20, 0x20}, {0x41, 0x47}, {0x49, 0x4A}, {0x4D, 0x4E},
+    {0xA0, 0xA0}};
+
+static const symbol_cmap_range bookshelf_symbol_7_ranges[] = {
+    {0x20, 0x73}, {0x75, 0x7D}, {0x80, 0x85}, {0x87, 0x92}};
+
+static const symbol_cmap_range mt_extra_ranges[] = {
+    {0x20, 0x7E}, {0x80, 0xFF}};
+
+static const symbol_cmap_range euclid_math_two_ranges[] = {
+    {0x20, 0x2C}, {0x41, 0x5A}, {0x6B, 0x6B}, {0x80, 0xAB},
+    {0xB0, 0xCB}, {0xD0, 0xE5}, {0xF0, 0xF5}};
+
+static const symbol_cmap_range euclid_math_one_ranges[] = {
+    {0x20, 0x2D}, {0x30, 0x39}, {0x41, 0x5A}, {0x80, 0x8D},
+    {0x90, 0x99}, {0xA0, 0xAE}, {0xB0, 0xD3}, {0xE0, 0xEA},
+    {0xF0, 0xFF}};
+
+/*
+ * Fonts with Windows platformID=3, encodingID=0 symbol cmaps often map
+ * single-byte record data to PUA code points as F000+byte.  MathType fonts
+ * keep narrower per-font ranges to avoid remapping bytes they do not encode.
+ */
+static const symbol_cmap_font symbol_cmap_fonts[] = {
+    {"Symbol", SYMBOL_CMAP_EXACT, SYMBOL_CMAP_SYMBOLISH_CHARSET, symbol_ranges,
+     sizeof(symbol_ranges) / sizeof(symbol_ranges[0])},
+    {"Wingdings 2", SYMBOL_CMAP_EXACT, SYMBOL_CMAP_SYMBOLISH_CHARSET,
+     wingdings_2_ranges,
+     sizeof(wingdings_2_ranges) / sizeof(wingdings_2_ranges[0])},
+    {"Wingdings 3", SYMBOL_CMAP_EXACT, SYMBOL_CMAP_SYMBOLISH_CHARSET,
+     wingdings_3_ranges,
+     sizeof(wingdings_3_ranges) / sizeof(wingdings_3_ranges[0])},
+    {"Wingdings", SYMBOL_CMAP_EXACT, SYMBOL_CMAP_SYMBOLISH_CHARSET,
+     wingdings_ranges,
+     sizeof(wingdings_ranges) / sizeof(wingdings_ranges[0])},
+    {"Webdings", SYMBOL_CMAP_EXACT, SYMBOL_CMAP_SYMBOLISH_CHARSET,
+     wingdings_ranges,
+     sizeof(wingdings_ranges) / sizeof(wingdings_ranges[0])},
+    {"Marlett", SYMBOL_CMAP_EXACT, SYMBOL_CMAP_SYMBOLISH_CHARSET,
+     marlett_ranges,
+     sizeof(marlett_ranges) / sizeof(marlett_ranges[0])},
+    {"MS Reference Specialty", SYMBOL_CMAP_EXACT, SYMBOL_CMAP_SYMBOLISH_CHARSET,
+     ms_reference_specialty_ranges,
+     sizeof(ms_reference_specialty_ranges) /
+         sizeof(ms_reference_specialty_ranges[0])},
+    {"MS Outlook", SYMBOL_CMAP_EXACT, SYMBOL_CMAP_SYMBOLISH_CHARSET,
+     ms_outlook_ranges,
+     sizeof(ms_outlook_ranges) / sizeof(ms_outlook_ranges[0])},
+    {"Bookshelf Symbol 7", SYMBOL_CMAP_EXACT, SYMBOL_CMAP_SYMBOLISH_CHARSET,
+     bookshelf_symbol_7_ranges,
+     sizeof(bookshelf_symbol_7_ranges) /
+         sizeof(bookshelf_symbol_7_ranges[0])},
+    {"MT Extra", SYMBOL_CMAP_EXACT, SYMBOL_CMAP_ANY_CHARSET, mt_extra_ranges,
+     sizeof(mt_extra_ranges) / sizeof(mt_extra_ranges[0])},
+    {"Euclid Math Two", SYMBOL_CMAP_EXACT, SYMBOL_CMAP_ANY_CHARSET,
+     euclid_math_two_ranges,
+     sizeof(euclid_math_two_ranges) / sizeof(euclid_math_two_ranges[0])},
+    {"Euclid Math One", SYMBOL_CMAP_EXACT, SYMBOL_CMAP_ANY_CHARSET,
+     euclid_math_one_ranges,
+     sizeof(euclid_math_one_ranges) / sizeof(euclid_math_one_ranges[0])}};
+
+/* Return an ASCII-lowercase byte for case-insensitive font-family matching. */
+static unsigned char ascii_lower(unsigned char c) {
+    if (c >= 'A' && c <= 'Z') {
+        return (unsigned char)(c + ('a' - 'A'));
+    }
+    return c;
+}
+
+/* Compare font-family names without depending on platform strcasecmp APIs. */
+static bool font_family_equals(const char *family, const char *expected) {
+    size_t i;
+
+    if (family == NULL || expected == NULL) {
+        return false;
+    }
+    for (i = 0; family[i] != '\0' && expected[i] != '\0'; i++) {
+        if (ascii_lower((unsigned char)family[i]) !=
+            ascii_lower((unsigned char)expected[i])) {
+            return false;
+        }
+    }
+    return family[i] == '\0' && expected[i] == '\0';
+}
+
+/* Match font-family prefixes for numbered legacy symbol families. */
+static bool font_family_starts_with(const char *family, const char *prefix) {
+    size_t i;
+
+    if (family == NULL || prefix == NULL) {
+        return false;
+    }
+    for (i = 0; prefix[i] != '\0'; i++) {
+        if (family[i] == '\0' ||
+            ascii_lower((unsigned char)family[i]) !=
+                ascii_lower((unsigned char)prefix[i])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/*
+ * Return true when the LOGFONT charset can address a Windows symbol cmap.
+ * ANSI_CHARSET plus Wingdings can be a font-mapper fallback request whose bytes
+ * must stay normal text, as seen in tests/resources/wmf/text.wmf.
+ */
+static bool symbol_cmap_font_accepts_charset(const symbol_cmap_font *font,
+                                             uint8_t charset) {
+    if (font == NULL) {
+        return false;
+    }
+    if (font->charset_rule == SYMBOL_CMAP_ANY_CHARSET) {
+        return true;
+    }
+    return charset == U_SYMBOL_CHARSET || charset == U_DEFAULT_CHARSET;
+}
+
+/* Return the symbol-cmap rule for the current font family, if one is known. */
+static const symbol_cmap_font *find_symbol_cmap_font(drawingStates *states) {
+    const char *family;
+    uint8_t charset;
+    size_t i;
+
+    if (states == NULL) {
+        return NULL;
+    }
+
+    family = states->currentDeviceContext.font_family;
+    charset = states->currentDeviceContext.font_charset;
+    for (i = 0; i < sizeof(symbol_cmap_fonts) / sizeof(symbol_cmap_fonts[0]);
+         i++) {
+        if (!symbol_cmap_font_accepts_charset(&symbol_cmap_fonts[i],
+                                              charset)) {
+            continue;
+        }
+        if (symbol_cmap_fonts[i].match == SYMBOL_CMAP_PREFIX &&
+            font_family_starts_with(family, symbol_cmap_fonts[i].family)) {
+            return &symbol_cmap_fonts[i];
+        }
+        if (symbol_cmap_fonts[i].match == SYMBOL_CMAP_EXACT &&
+            font_family_equals(family, symbol_cmap_fonts[i].family)) {
+            return &symbol_cmap_fonts[i];
+        }
+    }
+    return NULL;
+}
+
+/* Map one symbol-cmap byte through the font's F000+byte PUA ranges. */
+static uint32_t symbol_cmap_codepoint(unsigned char code,
+                                      const symbol_cmap_font *font) {
+    size_t i;
+
+    if (font == NULL) {
+        return code;
+    }
+    for (i = 0; i < font->range_count; i++) {
+        if (code >= font->ranges[i].first && code <= font->ranges[i].last) {
+            return 0xF000U + code;
+        }
     }
     return code;
 }
 
-/* Map MT Extra bytes to its MathType PUA cmap, fixing blackboard glyph loss. */
-static uint32_t mt_extra_codepoint(unsigned char code) {
-    if (code >= 0x20 && code != 0x7F) {
-        return 0xF000U + code;
-    }
-    return code;
-}
-
-/* Map Euclid Math Two bytes to its MathType PUA cmap for large operators. */
-static uint32_t euclid_math_two_codepoint(unsigned char code) {
-    if ((code >= 0x20 && code <= 0x2C) ||
-        (code >= 0x41 && code <= 0x5A) ||
-        code == 0x6B ||
-        (code >= 0x80 && code <= 0xAB) ||
-        (code >= 0xB0 && code <= 0xCB) ||
-        (code >= 0xD0 && code <= 0xE5) ||
-        (code >= 0xF0 && code <= 0xF5)) {
-        return 0xF000U + code;
-    }
-    return code;
-}
-
-/* Map Euclid Math One bytes to its MathType PUA cmap, fixing glyph-code loss. */
-static uint32_t euclid_math_one_codepoint(unsigned char code) {
-    if ((code >= 0x20 && code <= 0x2D) ||
-        (code >= 0x30 && code <= 0x39) ||
-        (code >= 0x41 && code <= 0x5A) ||
-        (code >= 0x80 && code <= 0x8D) ||
-        (code >= 0x90 && code <= 0x99) ||
-        (code >= 0xA0 && code <= 0xAE) ||
-        (code >= 0xB0 && code <= 0xD3) ||
-        (code >= 0xE0 && code <= 0xEA) ||
-        (code >= 0xF0 && code <= 0xFF)) {
-        return 0xF000U + code;
-    }
-    return code;
-}
-
-/* Return true for Symbol-font text whose bytes need Symbol encoding, not ASCII. */
-static bool is_symbol_text(drawingStates *states) {
-    return states != NULL &&
-           states->currentDeviceContext.font_family != NULL &&
-           strcmp(states->currentDeviceContext.font_family, "Symbol") == 0;
-}
-
-/* Return true for MT Extra text whose bytes are font-specific glyph codes. */
-static bool is_mt_extra_text(drawingStates *states) {
-    return states != NULL &&
-           states->currentDeviceContext.font_family != NULL &&
-           strcmp(states->currentDeviceContext.font_family, "MT Extra") == 0;
-}
-
-/* Return true for Euclid Math Two glyph-encoded operator text. */
-static bool is_euclid_math_two_text(drawingStates *states) {
-    return states != NULL &&
-           states->currentDeviceContext.font_family != NULL &&
-           strcmp(states->currentDeviceContext.font_family,
-                  "Euclid Math Two") == 0;
-}
-
-/* Return true for Euclid Math One glyph-encoded operator text. */
-static bool is_euclid_math_one_text(drawingStates *states) {
-    return states != NULL &&
-           states->currentDeviceContext.font_family != NULL &&
-           strcmp(states->currentDeviceContext.font_family,
-                  "Euclid Math One") == 0;
-}
-
-/* Convert font-specific single-byte text to UTF-8 for SVG output. */
-static int encoded_font_to_utf8(char *in, size_t size_in, char **out,
-                                size_t *out_len,
-                                uint32_t (*codepoint)(unsigned char)) {
+/* Convert symbol-cmap single-byte text to UTF-8 for SVG output. */
+static int symbol_cmap_text_to_utf8(char *in, size_t size_in, char **out,
+                                    size_t *out_len,
+                                    const symbol_cmap_font *font) {
     size_t capacity = size_in * 4 + 1;
     size_t offset = 0;
     size_t i;
 
-    if (codepoint == NULL) {
+    if (font == NULL) {
         return 1;
     }
     *out = (char *)calloc(capacity, 1);
@@ -1610,7 +1849,8 @@ static int encoded_font_to_utf8(char *in, size_t size_in, char **out,
     }
     for (i = 0; i < size_in; i++) {
         if (!utf8_append_codepoint(*out, capacity, &offset,
-                                   codepoint((unsigned char)in[i]))) {
+                                   symbol_cmap_codepoint((unsigned char)in[i],
+                                                         font))) {
             free(*out);
             *out = NULL;
             return 1;
@@ -1630,8 +1870,30 @@ static const char *text_charset_encoding(drawingStates *states) {
     switch (states->currentDeviceContext.font_charset) {
     case U_ANSI_CHARSET:
         return "CP1252";
+    case U_SHIFTJIS_CHARSET:
+        return "CP932";
+    case U_HANGUL_CHARSET:
+        return "CP949";
     case U_GB2312_CHARSET:
         return "CP936";
+    case U_CHINESEBIG5_CHARSET:
+        return "CP950";
+    case U_GREEK_CHARSET:
+        return "CP1253";
+    case U_TURKISH_CHARSET:
+        return "CP1254";
+    case U_HEBREW_CHARSET:
+        return "CP1255";
+    case U_ARABIC_CHARSET:
+        return "CP1256";
+    case U_BALTIC_CHARSET:
+        return "CP1257";
+    case U_RUSSIAN_CHARSET:
+        return "CP1251";
+    case U_EASTEUROPE_CHARSET:
+        return "CP1250";
+    case U_THAI_CHARSET:
+        return "CP874";
     default:
         return NULL;
     }
@@ -1639,8 +1901,19 @@ static const char *text_charset_encoding(drawingStates *states) {
 
 /* Return true when ExtTextOutA bytes must be decoded as a whole string. */
 static bool text_charset_is_multibyte(drawingStates *states) {
-    return states != NULL &&
-           states->currentDeviceContext.font_charset == U_GB2312_CHARSET;
+    if (states == NULL) {
+        return false;
+    }
+
+    switch (states->currentDeviceContext.font_charset) {
+    case U_SHIFTJIS_CHARSET:
+    case U_HANGUL_CHARSET:
+    case U_GB2312_CHARSET:
+    case U_CHINESEBIG5_CHARSET:
+        return true;
+    default:
+        return false;
+    }
 }
 
 /* Convert ExtTextOutA bytes through the current charset code page. */
@@ -1748,6 +2021,7 @@ void reverse_utf8(char *in, size_t size_in) {
 void text_convert(char *in, size_t size_in, char **out, size_t *size_out,
                   uint8_t type, drawingStates *states) {
     uint8_t *string;
+    const symbol_cmap_font *symbol_font;
     int ret = 0;
 
     switch (type) {
@@ -1814,24 +2088,9 @@ void text_convert(char *in, size_t size_in, char **out, size_t *size_out,
                           (uintptr_t)((uintptr_t)in + (uintptr_t)size_in))) {
             string = NULL;
         }
-        else if (is_symbol_text(states)) {
-            ret = encoded_font_to_utf8(in, size_in, (char **)&string, size_out,
-                                       symbol_codepoint);
-            type = UTF_16;
-        }
-        else if (is_mt_extra_text(states)) {
-            ret = encoded_font_to_utf8(in, size_in, (char **)&string, size_out,
-                                       mt_extra_codepoint);
-            type = UTF_16;
-        }
-        else if (is_euclid_math_two_text(states)) {
-            ret = encoded_font_to_utf8(in, size_in, (char **)&string, size_out,
-                                       euclid_math_two_codepoint);
-            type = UTF_16;
-        }
-        else if (is_euclid_math_one_text(states)) {
-            ret = encoded_font_to_utf8(in, size_in, (char **)&string, size_out,
-                                       euclid_math_one_codepoint);
+        else if ((symbol_font = find_symbol_cmap_font(states)) != NULL) {
+            ret = symbol_cmap_text_to_utf8(in, size_in, (char **)&string,
+                                           size_out, symbol_font);
             type = UTF_16;
         }
         else if (text_charset_encoding(states) != NULL) {
