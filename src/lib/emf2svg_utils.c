@@ -271,7 +271,6 @@ void endFormDraw(drawingStates *states, FILE *out) {
         bool stroked = false;
         stroke_draw(states, out, &filled, &stroked);
         fill_draw(states, out, &filled, &stroked);
-        clipset_draw(states, out);
         if (!filled)
             fprintf(out, "fill=\"none\" ");
         if (!stroked)
@@ -1656,6 +1655,22 @@ static const char *text_charset_encoding(drawingStates *states) {
         return "CP936";
     case U_CHINESEBIG5_CHARSET:
         return "CP950";
+    case U_GREEK_CHARSET:
+        return "CP1253";
+    case U_TURKISH_CHARSET:
+        return "CP1254";
+    case U_HEBREW_CHARSET:
+        return "CP1255";
+    case U_ARABIC_CHARSET:
+        return "CP1256";
+    case U_BALTIC_CHARSET:
+        return "CP1257";
+    case U_RUSSIAN_CHARSET:
+        return "CP1251";
+    case U_EASTEUROPE_CHARSET:
+        return "CP1250";
+    case U_THAI_CHARSET:
+        return "CP874";
     default:
         return NULL;
     }
