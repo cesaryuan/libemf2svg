@@ -1549,8 +1549,29 @@ typedef struct symbol_cmap_font {
     size_t range_count;
 } symbol_cmap_font;
 
-static const symbol_cmap_range windows_symbol_ranges[] = {
-    {0x20, 0x7E}, {0xA1, 0xEF}, {0xF1, 0xFE}};
+static const symbol_cmap_range symbol_ranges[] = {{0x20, 0xFF}};
+
+static const symbol_cmap_range wingdings_ranges[] = {
+    {0x20, 0x7E}, {0x80, 0xFF}};
+
+static const symbol_cmap_range wingdings_2_ranges[] = {
+    {0x20, 0x7E}, {0x80, 0xF9}};
+
+static const symbol_cmap_range wingdings_3_ranges[] = {
+    {0x20, 0x7E}, {0x80, 0xF0}};
+
+static const symbol_cmap_range marlett_ranges[] = {
+    {0x30, 0x39}, {0x57, 0x57}, {0x61, 0x79}, {0xA1, 0xA3}};
+
+static const symbol_cmap_range ms_reference_specialty_ranges[] = {
+    {0x20, 0x20}, {0x23, 0xCB}};
+
+static const symbol_cmap_range ms_outlook_ranges[] = {
+    {0x20, 0x20}, {0x41, 0x47}, {0x49, 0x4A}, {0x4D, 0x4E},
+    {0xA0, 0xA0}};
+
+static const symbol_cmap_range bookshelf_symbol_7_ranges[] = {
+    {0x20, 0x73}, {0x75, 0x7D}, {0x80, 0x85}, {0x87, 0x92}};
 
 static const symbol_cmap_range mt_extra_ranges[] = {
     {0x20, 0x7E}, {0x80, 0xFF}};
@@ -1570,14 +1591,27 @@ static const symbol_cmap_range euclid_math_one_ranges[] = {
  * keep narrower per-font ranges to avoid remapping bytes they do not encode.
  */
 static const symbol_cmap_font symbol_cmap_fonts[] = {
-    {"Symbol", SYMBOL_CMAP_EXACT, windows_symbol_ranges,
-     sizeof(windows_symbol_ranges) / sizeof(windows_symbol_ranges[0])},
-    {"Wingdings", SYMBOL_CMAP_PREFIX, windows_symbol_ranges,
-     sizeof(windows_symbol_ranges) / sizeof(windows_symbol_ranges[0])},
-    {"Webdings", SYMBOL_CMAP_EXACT, windows_symbol_ranges,
-     sizeof(windows_symbol_ranges) / sizeof(windows_symbol_ranges[0])},
-    {"Marlett", SYMBOL_CMAP_EXACT, windows_symbol_ranges,
-     sizeof(windows_symbol_ranges) / sizeof(windows_symbol_ranges[0])},
+    {"Symbol", SYMBOL_CMAP_EXACT, symbol_ranges,
+     sizeof(symbol_ranges) / sizeof(symbol_ranges[0])},
+    {"Wingdings 2", SYMBOL_CMAP_EXACT, wingdings_2_ranges,
+     sizeof(wingdings_2_ranges) / sizeof(wingdings_2_ranges[0])},
+    {"Wingdings 3", SYMBOL_CMAP_EXACT, wingdings_3_ranges,
+     sizeof(wingdings_3_ranges) / sizeof(wingdings_3_ranges[0])},
+    {"Wingdings", SYMBOL_CMAP_EXACT, wingdings_ranges,
+     sizeof(wingdings_ranges) / sizeof(wingdings_ranges[0])},
+    {"Webdings", SYMBOL_CMAP_EXACT, wingdings_ranges,
+     sizeof(wingdings_ranges) / sizeof(wingdings_ranges[0])},
+    {"Marlett", SYMBOL_CMAP_EXACT, marlett_ranges,
+     sizeof(marlett_ranges) / sizeof(marlett_ranges[0])},
+    {"MS Reference Specialty", SYMBOL_CMAP_EXACT,
+     ms_reference_specialty_ranges,
+     sizeof(ms_reference_specialty_ranges) /
+         sizeof(ms_reference_specialty_ranges[0])},
+    {"MS Outlook", SYMBOL_CMAP_EXACT, ms_outlook_ranges,
+     sizeof(ms_outlook_ranges) / sizeof(ms_outlook_ranges[0])},
+    {"Bookshelf Symbol 7", SYMBOL_CMAP_EXACT, bookshelf_symbol_7_ranges,
+     sizeof(bookshelf_symbol_7_ranges) /
+         sizeof(bookshelf_symbol_7_ranges[0])},
     {"MT Extra", SYMBOL_CMAP_EXACT, mt_extra_ranges,
      sizeof(mt_extra_ranges) / sizeof(mt_extra_ranges[0])},
     {"Euclid Math Two", SYMBOL_CMAP_EXACT, euclid_math_two_ranges,
