@@ -80,7 +80,7 @@ typedef struct emf_graph_object {
     bool font_set;
     char *font_name;
     char *font_family;
-    uint32_t font_height;
+    int32_t font_height;
     uint32_t font_width;
     bool font_italic;
     bool font_underline;
@@ -135,7 +135,7 @@ typedef struct emf_device_context {
     bool font_set;
     char *font_name;
     char *font_family;
-    uint32_t font_height;
+    int32_t font_height;
     uint32_t font_width;
     bool font_italic;
     bool font_underline;
@@ -201,6 +201,18 @@ typedef struct emf_device_context {
 // Stack of EMF Device Contexts
 typedef struct dc_stack {
     EMF_DEVICE_CONTEXT DeviceContext;
+    double viewPortOrgX;
+    double viewPortOrgY;
+    double viewPortExX;
+    double viewPortExY;
+    bool viewPortExSet;
+    double windowOrgX;
+    double windowOrgY;
+    double windowExX;
+    double windowExY;
+    bool windowExSet;
+    uint16_t MapMode;
+    uint32_t text_layout;
     struct dc_stack *previous;
 } EMF_DEVICE_CONTEXT_STACK;
 

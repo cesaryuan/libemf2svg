@@ -1,0 +1,47 @@
+<?xml version="1.0"  encoding="UTF-8" standalone="no"?>
+<svg version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="545.0000" height="489.0000">
+<g transform="translate(-3.0000, -76.0000)">
+<path d="M 150.0000,489.0000 L 421.0000,489.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round" fill="none" />
+<path d="M 150.0000,489.0000 L 150.0000,498.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round" fill="none" />
+<path d="M 285.0000,489.0000 L 285.0000,498.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round" fill="none" />
+<path d="M 421.0000,489.0000 L 421.0000,498.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round" fill="none" />
+<text font-family="Arial" fill="#000000" style ="white-space:pre;" font-weight="400" text-anchor="middle" x="150.0000" y="524.0000" font-size="16.0000" ><tspan x="150.0000"><![CDATA[1]]></tspan><tspan x="159.0000"><![CDATA[0]]></tspan></text>
+<text font-family="Arial" fill="#000000" style ="white-space:pre;" font-weight="400" text-anchor="middle" x="285.0000" y="524.0000" font-size="16.0000" ><tspan x="285.0000"><![CDATA[1]]></tspan><tspan x="294.0000"><![CDATA[5]]></tspan></text>
+<text font-family="Arial" fill="#000000" style ="white-space:pre;" font-weight="400" text-anchor="middle" x="421.0000" y="524.0000" font-size="16.0000" ><tspan x="421.0000"><![CDATA[2]]></tspan><tspan x="430.0000"><![CDATA[0]]></tspan></text>
+<path d="M 78.0000,448.0000 L 78.0000,129.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round" fill="none" />
+<path d="M 78.0000,448.0000 L 69.0000,448.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round" fill="none" />
+<path d="M 78.0000,384.0000 L 69.0000,384.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round" fill="none" />
+<path d="M 78.0000,320.0000 L 69.0000,320.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round" fill="none" />
+<path d="M 78.0000,256.0000 L 69.0000,256.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round" fill="none" />
+<path d="M 78.0000,192.0000 L 69.0000,192.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round" fill="none" />
+<path d="M 78.0000,129.0000 L 69.0000,129.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round" fill="none" />
+<text font-family="Arial" fill="#000000" transform="rotate(-90, 56.0000, 462.4000) translate(0, 14.4000)" style ="white-space:pre;" font-weight="400" text-anchor="middle" x="56.0000" y="448.0000" font-size="16.0000" ><tspan x="56.0000"><![CDATA[1]]></tspan><tspan x="65.0000"><![CDATA[.]]></tspan><tspan x="69.0000"><![CDATA[0]]></tspan><tspan x="78.0000"><![CDATA[6]]></tspan></text>
+<text font-family="Arial" fill="#000000" transform="rotate(-90, 56.0000, 398.4000) translate(0, 14.4000)" style ="white-space:pre;" font-weight="400" text-anchor="middle" x="56.0000" y="384.0000" font-size="16.0000" ><tspan x="56.0000"><![CDATA[1]]></tspan><tspan x="65.0000"><![CDATA[.]]></tspan><tspan x="69.0000"><![CDATA[0]]></tspan><tspan x="78.0000"><![CDATA[8]]></tspan></text>
+<text font-family="Arial" fill="#000000" transform="rotate(-90, 56.0000, 334.4000) translate(0, 14.4000)" style ="white-space:pre;" font-weight="400" text-anchor="middle" x="56.0000" y="320.0000" font-size="16.0000" ><tspan x="56.0000"><![CDATA[1]]></tspan><tspan x="65.0000"><![CDATA[.]]></tspan><tspan x="69.0000"><![CDATA[1]]></tspan><tspan x="78.0000"><![CDATA[0]]></tspan></text>
+<text font-family="Arial" fill="#000000" transform="rotate(-90, 56.0000, 270.4000) translate(0, 14.4000)" style ="white-space:pre;" font-weight="400" text-anchor="middle" x="56.0000" y="256.0000" font-size="16.0000" ><tspan x="56.0000"><![CDATA[1]]></tspan><tspan x="65.0000"><![CDATA[.]]></tspan><tspan x="69.0000"><![CDATA[1]]></tspan><tspan x="78.0000"><![CDATA[2]]></tspan></text>
+<text font-family="Arial" fill="#000000" transform="rotate(-90, 56.0000, 206.4000) translate(0, 14.4000)" style ="white-space:pre;" font-weight="400" text-anchor="middle" x="56.0000" y="192.0000" font-size="16.0000" ><tspan x="56.0000"><![CDATA[1]]></tspan><tspan x="65.0000"><![CDATA[.]]></tspan><tspan x="69.0000"><![CDATA[1]]></tspan><tspan x="78.0000"><![CDATA[4]]></tspan></text>
+<text font-family="Arial" fill="#000000" transform="rotate(-90, 56.0000, 143.4000) translate(0, 14.4000)" style ="white-space:pre;" font-weight="400" text-anchor="middle" x="56.0000" y="129.0000" font-size="16.0000" ><tspan x="56.0000"><![CDATA[1]]></tspan><tspan x="65.0000"><![CDATA[.]]></tspan><tspan x="69.0000"><![CDATA[1]]></tspan><tspan x="78.0000"><![CDATA[6]]></tspan></text>
+<path d="M 78.0000,489.0000 L 546.0000,489.0000 L 546.0000,78.0000 L 78.0000,78.0000 L 78.0000,489.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round" fill="none" />
+<text font-family="Arial" fill="#000000" style ="white-space:pre;" font-weight="400" text-anchor="middle" x="312.0000" y="563.0000" font-size="16.0000" ><tspan x="312.0000"><![CDATA[M]]></tspan><tspan x="325.0000"><![CDATA[o]]></tspan><tspan x="334.0000"><![CDATA[m]]></tspan><tspan x="347.0000"><![CDATA[e]]></tspan><tspan x="356.0000"><![CDATA[n]]></tspan><tspan x="364.0000"><![CDATA[t]]></tspan></text>
+<text font-family="Arial" fill="#000000" transform="rotate(-90, 18.0000, 297.4000) translate(0, 14.4000)" style ="white-space:pre;" font-weight="400" text-anchor="middle" x="18.0000" y="283.0000" font-size="16.0000" ><tspan x="18.0000"><![CDATA[I]]></tspan><tspan x="22.0000"><![CDATA[n]]></tspan><tspan x="31.0000"><![CDATA[d]]></tspan><tspan x="40.0000"><![CDATA[i]]></tspan><tspan x="44.0000"><![CDATA[c]]></tspan><tspan x="52.0000"><![CDATA[e]]></tspan></text>
+<path d="M 150.0000,489.0000 L 150.0000,78.0000 " stroke="#D3D3D3" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round" fill="none" />
+<path d="M 285.0000,489.0000 L 285.0000,78.0000 " stroke="#D3D3D3" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round" fill="none" />
+<path d="M 421.0000,489.0000 L 421.0000,78.0000 " stroke="#D3D3D3" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round" fill="none" />
+<path d="M 78.0000,448.0000 L 546.0000,448.0000 " stroke="#D3D3D3" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round" fill="none" />
+<path d="M 78.0000,384.0000 L 546.0000,384.0000 " stroke="#D3D3D3" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round" fill="none" />
+<path d="M 78.0000,320.0000 L 546.0000,320.0000 " stroke="#D3D3D3" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round" fill="none" />
+<path d="M 78.0000,256.0000 L 546.0000,256.0000 " stroke="#D3D3D3" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round" fill="none" />
+<path d="M 78.0000,192.0000 L 546.0000,192.0000 " stroke="#D3D3D3" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round" fill="none" />
+<path d="M 78.0000,129.0000 L 546.0000,129.0000 " stroke="#D3D3D3" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round" fill="none" />
+<path d="M 78.0000,489.0000 L 546.0000,489.0000 L 546.0000,78.0000 L 78.0000,78.0000 L 78.0000,489.0000 " stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round" fill="none" />
+<ellipse cx="96.0000" cy="266.0000" rx="3.0000" ry="3.0000" fill="none" stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round" />
+<ellipse cx="150.0000" cy="224.0000" rx="3.0000" ry="3.0000" fill="none" stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round" />
+<ellipse cx="204.0000" cy="93.0000" rx="3.0000" ry="3.0000" fill="none" stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round" />
+<ellipse cx="258.0000" cy="192.0000" rx="3.0000" ry="3.0000" fill="none" stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round" />
+<ellipse cx="312.0000" cy="189.0000" rx="3.0000" ry="3.0000" fill="none" stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round" />
+<ellipse cx="366.0000" cy="228.0000" rx="3.0000" ry="3.0000" fill="none" stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round" />
+<ellipse cx="421.0000" cy="298.0000" rx="3.0000" ry="3.0000" fill="none" stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round" />
+<ellipse cx="475.0000" cy="410.0000" rx="3.0000" ry="3.0000" fill="none" stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round" />
+<ellipse cx="529.0000" cy="473.0000" rx="3.0000" ry="3.0000" fill="none" stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round" />
+</g>
+</svg>

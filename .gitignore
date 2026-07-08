@@ -37,6 +37,8 @@ emf2svg-conv
 # out directory
 out
 build
+build-wasm
+tests/snapshot-out
 
 # test files
 tests/resources/tmp
@@ -60,3 +62,6 @@ vcpkg_installed
 vcpkg-manifest-install.log
 vcpkg-bootstrap.log
 coverage.*
+emsdk
+
+tests/resources/wmf/*.svg

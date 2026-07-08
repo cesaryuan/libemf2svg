@@ -24,12 +24,22 @@ typedef struct {
     double imgWidth;
 } generatorOptions;
 
+// structure containing WMF to EMF conversion arguments
+typedef struct {
+    // Verbose mode, report unsupported WMF records if True
+    bool verbose;
+} wmf2emfOptions;
+
 // convert function
 #ifdef _MSC_VER
 __declspec(dllexport)
 #endif
 int emf2svg(char *contents, size_t length, char **out, size_t *out_length,
             generatorOptions *options);
+
+// convert WMF bytes to EMF bytes
+int wmf2emf(char *contents, size_t length, char **out, size_t *out_length,
+            wmf2emfOptions *options);
 
 // check if emf file contains emf+ records
 int emf2svg_is_emfplus(char *contents, size_t length, bool *is_emfp);

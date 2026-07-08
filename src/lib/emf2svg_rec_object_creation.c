@@ -195,7 +195,7 @@ void U_EMREXTCREATEFONTINDIRECTW_draw(const char *contents, FILE *out,
     }
     char *family = U_Utf16leToUtf8(logfont.lfFaceName, U_LF_FACESIZE, NULL);
     states->objectTable[index].font_width = abs(logfont.lfWidth);
-    states->objectTable[index].font_height = abs(logfont.lfHeight);
+    states->objectTable[index].font_height = logfont.lfHeight;
     states->objectTable[index].font_weight = logfont.lfWeight;
     states->objectTable[index].font_italic = logfont.lfItalic;
     states->objectTable[index].font_underline = logfont.lfUnderline;

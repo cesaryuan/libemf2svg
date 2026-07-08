@@ -138,6 +138,16 @@ Report bugs to https://github.com/kakwa/libemf2svg/issues.
 $ ./emf2svg-conv -i ./tests/resources/emf/test-037.emf -o example.svg -v
 ```
 
+WMF to EMF conversion is available through `wmf2emf-conv`:
+
+```bash
+$ ./wmf2emf-conv -i ./tests/resources/wmf/sample.wmf -o sample.emf -v
+```
+
+The WMF converter covers the common drawing, clipping, text, pen, and brush
+records needed by the bundled WMF samples. Unsupported WMF records are skipped;
+use `-v` to list them while converting.
+
 Library
 -------
 
@@ -211,6 +221,30 @@ int main(int argc, char *argv[]){
 ```
 
 See [./src/conv/emf2svg.cpp](https://github.com/kakwa/libemf2svg/blob/master/src/conv/emf2svg.cpp) for a real life example.
+
+Conversion from WMF to EMF:
+```C
+#include <emf2svg.h>
+
+int main(int argc, char *argv[]){
+    /* wmf content size */
+    size_t wmf_size;
+    /* wmf content */
+    char *wmf_content;
+    /* emf output bytes */
+    char *emf_out = NULL;
+    /* emf output length */
+    size_t emf_out_len = 0;
+
+    wmf2emfOptions options = {0};
+    options.verbose = true;
+
+    int ret = wmf2emf(wmf_content, wmf_size, &emf_out, &emf_out_len, &options);
+
+    //[...]
+    free(emf_out);
+}
+```
 
 EMF/EMF+ record type coverage
 -----------------------------
@@ -374,7 +408,9 @@ General source code organisation:
 * [./src/lib/emf2svg_print.c](https://github.com/kakwa/libemf2svg/blob/master/src/lib/emf2svg_print.c): EMF record printer (debugging).
 * [./src/lib/pmf2svg.c](https://github.com/kakwa/libemf2svg/blob/master/src/lib/pmf2svg.c): EMF+ record handler.
 * [./src/lib/pmf2svg_print.c](https://github.com/kakwa/libemf2svg/blob/master/src/lib/pmf2svg_print.c): EMF+ record printer (debugging).
+* [./src/lib/wmf2emf.c](https://github.com/kakwa/libemf2svg/blob/master/src/lib/wmf2emf.c): WMF to EMF converter.
 * [./src/conv/emf2svg.cpp](https://github.com/kakwa/libemf2svg/blob/master/src/conv/emf2svg.cpp): Command line tool.
+* [./src/conv/wmf2emf.cpp](https://github.com/kakwa/libemf2svg/blob/master/src/conv/wmf2emf.cpp): WMF to EMF command line tool.
 * [./deps](https://github.com/kakwa/libemf2svg/blob/master/deps): external dependencies.
 
 Useful links:
@@ -429,6 +465,27 @@ tests/out/test-000.emf.svg  tests/out/test-051.emf.svg
 ```
 
 The emf files used for these checks are located in [./tests/resources/emf/](https://github.com/kakwa/libemf2svg/blob/master/tests/resources/emf/).
+
+* Check SVG snapshots against the current baseline:
+
+```bash
+# Save the current converter output as the baseline.
+$ ./tests/resources/snapshot.sh save
+
+# On another branch, regenerate SVGs and compare them with the baseline.
+$ ./tests/resources/snapshot.sh check
+
+# Show the full diff for one changed sample.
+$ ./tests/resources/snapshot.sh check --detail-diff test-000.emf.svg
+
+# Run the same snapshot workflow for WMF inputs via wmf2emf-conv + emf2svg-conv.
+$ ./tests/resources/snapshot.sh save --format wmf
+$ ./tests/resources/snapshot.sh check --format wmf
+```
+
+The default EMF baseline lives in `tests/snapshots/emf/`; WMF baselines live in
+`tests/snapshots/wmf/`. Temporary comparison output goes under
+`tests/snapshot-out/`.
 
 Useful Commands
 ---------------
