@@ -7,7 +7,45 @@ extern "C" {
 #endif
 #include "emf2svg_private.h"
 #include "emf2svg_print.h"
+#include <math.h>
 #include <stdio.h>
+
+/**
+  \brief Return whether two world transforms are equivalent for SVG grouping.
+
+  RestoreDC can replace the current EMF world transform without emitting a
+  SETWORLDTRANSFORM record. Comparing with a tiny tolerance avoids rewriting
+  SVG groups for float round-off only.
+  */
+static bool world_transform_equal(const U_XFORM *a, const U_XFORM *b) {
+    const double tolerance = 0.000001;
+
+    return fabs((double)a->eM11 - (double)b->eM11) <= tolerance &&
+           fabs((double)a->eM12 - (double)b->eM12) <= tolerance &&
+           fabs((double)a->eM21 - (double)b->eM21) <= tolerance &&
+           fabs((double)a->eM22 - (double)b->eM22) <= tolerance &&
+           fabs((double)a->eDx - (double)b->eDx) <= tolerance &&
+           fabs((double)a->eDy - (double)b->eDy) <= tolerance;
+}
+
+/**
+  \brief Close a stale SVG transform group after RestoreDC changes the DC.
+
+  RestoreDC restores the world transform as part of the saved device context,
+  but no separate EMR_SETWORLDTRANSFORM record follows. Without closing the old
+  SVG group, later page-space records can remain inside a stale transform and be
+  transformed twice, as in test-171.emf connector lines.
+  */
+static void close_stale_restore_transform_group(FILE *out,
+                                                drawingStates *states,
+                                                const U_XFORM *previous) {
+    const U_XFORM *current = &states->currentDeviceContext.worldTransform;
+
+    if (states->transform_open && !world_transform_equal(previous, current)) {
+        fprintf(out, "</%sg>\n", states->nameSpaceString);
+        states->transform_open = false;
+    }
+}
 
 void U_EMRINVERTRGN_draw(const char *contents, FILE *out,
                          drawingStates *states) {
@@ -49,7 +87,11 @@ void U_EMRRESTOREDC_draw(const char *contents, FILE *out,
         U_EMRRESTOREDC_print(contents, states);
     }
     PU_EMRSETMAPMODE pEmr = (PU_EMRSETMAPMODE)(contents);
+    U_XFORM previous = states->currentDeviceContext.worldTransform;
     restoreDeviceContext(states, pEmr->iMode);
+    if (!states->Error) {
+        close_stale_restore_transform_group(out, states, &previous);
+    }
 }
 void U_EMRSAVEDC_draw(const char *contents, FILE *out, drawingStates *states) {
     FLAG_SUPPORTED;

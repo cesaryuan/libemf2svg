@@ -168,6 +168,7 @@
 </g>
 <g transform="matrix(0.2858 0.0000 0.0000 0.2853 887.0122 313.6664)">
 <ellipse cx="50.5000" cy="51.0000" rx="50.5000" ry="51.0000"  fill="#0080FF" stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round" />
+</g>
 <path d="M 35.4459,29.9705 L 44.0913,30.5469 " stroke="#000000" stroke-width="1px"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
 <path d="M 44.0913,30.5469 L 52.7366,32.2759 " stroke="#000000" stroke-width="1px"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
 <path d="M 52.7366,32.2759 L 61.3819,35.1577 " stroke="#000000" stroke-width="1px"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
@@ -268,7 +269,6 @@
 <path d="M 875.7733,35.1577 L 884.4186,32.2759 " stroke="#000000" stroke-width="1px"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
 <path d="M 884.4186,32.2759 L 893.0640,30.5469 " stroke="#000000" stroke-width="1px"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
 <path d="M 893.0640,30.5469 L 901.7093,29.9705 " stroke="#000000" stroke-width="1px"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
-</g>
 <g transform="matrix(0.2858 0.0000 0.0000 0.2853 20.7488 15.2657)">
 <rect x="0.0000" y="0.0000" width="101.0000" height="102.0000"  fill="#80FF00" stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round" />
 </g>
@@ -331,9 +331,9 @@
 </g>
 <g transform="matrix(0.2858 0.0000 0.0000 0.2853 887.0122 15.2657)">
 <rect x="0.0000" y="0.0000" width="101.0000" height="102.0000"  fill="#C0C0C0" stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round" />
+</g>
 <text font-family="HGPひげ文字" fill="#800080" transform="rotate(-296, 400.2794, 182.5032) translate(0, 53.6876)" style ="white-space:pre;" font-weight="400" text-anchor="start" x="400.2794" y="128.8156" font-size="59.6529" ><tspan x="400.2794"><![CDATA[s]]></tspan><tspan x="432.2672"><![CDATA[i]]></tspan><tspan x="447.2524"><![CDATA[n]]></tspan></text>
 <text font-family="HGPひげ文字" fill="#800080" transform="rotate(-298, 310.9442, 451.9497) translate(0, 53.6876)" style ="white-space:pre;" font-weight="400" text-anchor="start" x="310.9442" y="398.2622" font-size="59.6529" ><tspan x="310.9442"><![CDATA[c]]></tspan><tspan x="333.9984"><![CDATA[o]]></tspan><tspan x="361.9517"><![CDATA[s]]></tspan></text>
-</g>
 <g transform="matrix(0.2858 0.0000 0.0000 0.2853 552.1493 123.5655)">
 <path d="M 51.0000,0.0000 L 51.0000,102.0000 " stroke="#C0DCC0" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
 <path d="M 0.0000,51.0000 L 102.0000,51.0000 " stroke="#C0DCC0" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />

@@ -204,6 +204,7 @@
 <path d="M 784.3345,177.6197 L 627.1624,177.6197 " stroke="#800000" stroke-width="1px"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
 <g transform="matrix(0.2901 0.0000 0.0000 0.2898 640.2855 157.5536)">
 <rect x="0.0000" y="0.0000" width="17.0000" height="17.0000"  fill="#0000FF" stroke="#0000FF" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round" />
+</g>
 <text font-family="ＭＳ ゴシック" fill="#000000" style ="white-space:pre;" text-anchor="start" x="643.0322" y="160.2240" font-size="12.2075" ><tspan x="643.0322"><![CDATA[ ]]></tspan><tspan x="649.1360"><![CDATA[ ]]></tspan><tspan x="654.9346"><![CDATA[ ]]></tspan><tspan x="661.0383"><![CDATA[ ]]></tspan><tspan x="667.1421"><![CDATA[ ]]></tspan><tspan x="672.9407"><![CDATA[ ]]></tspan><tspan x="679.0445"><![CDATA[A]]></tspan><tspan x="685.1482"><![CDATA[B]]></tspan><tspan x="690.9468"><![CDATA[C]]></tspan></text>
 <text font-family="ＭＳ ゴシック" fill="#000000" transform="rotate(-30, 643.0322, 169.5627) translate(0, 9.3388)" style ="white-space:pre;" text-anchor="start" x="643.0322" y="160.2240" font-size="10.3764" ><tspan x="643.0322"><![CDATA[ ]]></tspan><tspan x="647.9152"><![CDATA[ ]]></tspan><tspan x="652.7983"><![CDATA[ ]]></tspan><tspan x="657.9865"><![CDATA[ ]]></tspan><tspan x="662.8695"><![CDATA[ ]]></tspan><tspan x="667.7525"><![CDATA[ ]]></tspan><tspan x="672.9407"><![CDATA[d]]></tspan><tspan x="677.8237"><![CDATA[e]]></tspan><tspan x="683.0119"><![CDATA[f]]></tspan></text>
 <text font-family="ＭＳ ゴシック" fill="#000000" transform="rotate(-60, 643.0322, 168.1894) translate(0, 7.9654)" style ="white-space:pre;" text-anchor="start" x="643.0322" y="160.2240" font-size="8.8505" ><tspan x="643.0322"><![CDATA[ ]]></tspan><tspan x="647.9152"><![CDATA[ ]]></tspan><tspan x="652.7983"><![CDATA[ ]]></tspan><tspan x="657.9865"><![CDATA[ ]]></tspan><tspan x="662.8695"><![CDATA[ ]]></tspan><tspan x="667.7525"><![CDATA[ ]]></tspan><tspan x="672.9407"><![CDATA[G]]></tspan><tspan x="677.8237"><![CDATA[H]]></tspan><tspan x="683.0119"><![CDATA[I]]></tspan></text>
@@ -336,7 +337,6 @@
 <path d="M 438.2507,533.1644 L 442.8286,524.9243 " stroke="#000000" stroke-width="1px"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
 <path d="M 442.8286,524.9243 L 447.1012,516.3790 " stroke="#000000" stroke-width="1px"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
 <path d="M 447.1012,516.3790 L 451.3738,508.1389 " stroke="#000000" stroke-width="1px"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
-</g>
 <g transform="matrix(0.2987 0.0000 0.0000 0.2984 11.2920 501.9731)">
 <ellipse cx="20.0000" cy="20.0000" rx="20.0000" ry="20.0000"  fill="#008000" stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round" />
 </g>
@@ -399,6 +399,7 @@
 </g>
 <g transform="matrix(0.2987 0.0000 0.0000 0.2984 444.9649 501.9731)">
 <ellipse cx="20.0000" cy="20.0000" rx="20.0000" ry="20.0000"  fill="#0080FF" stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round" />
+</g>
 <path d="M 17.7009,374.1611 L 21.9736,374.4663 " stroke="#000000" stroke-width="1px"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
 <path d="M 21.9736,374.4663 L 26.2462,375.3819 " stroke="#000000" stroke-width="1px"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
 <path d="M 26.2462,375.3819 L 30.8240,376.6026 " stroke="#000000" stroke-width="1px"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
@@ -499,7 +500,6 @@
 <path d="M 438.2507,376.6026 L 442.8286,375.3819 " stroke="#000000" stroke-width="1px"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
 <path d="M 442.8286,375.3819 L 447.1012,374.4663 " stroke="#000000" stroke-width="1px"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
 <path d="M 447.1012,374.4663 L 451.3738,374.1611 " stroke="#000000" stroke-width="1px"  stroke-linecap="round"  stroke-linejoin="round"  fill="none" />
-</g>
 <g transform="matrix(0.2987 0.0000 0.0000 0.2984 11.2920 367.9304)">
 <rect x="0.0000" y="0.0000" width="40.0000" height="40.0000"  fill="#80FF00" stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round" />
 </g>
@@ -562,6 +562,7 @@
 </g>
 <g transform="matrix(0.2987 0.0000 0.0000 0.2984 444.9649 367.9304)">
 <rect x="0.0000" y="0.0000" width="40.0000" height="40.0000"  fill="#C0C0C0" stroke="#000000" stroke-width="1.0000"  stroke-linecap="round"  stroke-linejoin="round" />
+</g>
 <text font-family="Arial" fill="#000000" transform="rotate(-297, 212.7164, 490.8042) translate(0, 24.1709)" style ="white-space:pre;" text-anchor="start" x="212.7164" y="466.6333" font-size="26.8566" ><tspan x="212.7164"><![CDATA[s]]></tspan><tspan x="224.9239"><![CDATA[i]]></tspan><tspan x="229.8070"><![CDATA[n]]></tspan></text>
 <text font-family="Arial" fill="#000000" transform="rotate(-299, 147.7112, 573.5103) translate(0, 24.1709)" style ="white-space:pre;" text-anchor="start" x="147.7112" y="549.3393" font-size="26.8566" ><tspan x="147.7112"><![CDATA[c]]></tspan><tspan x="159.6136"><![CDATA[o]]></tspan><tspan x="172.7367"><![CDATA[s]]></tspan></text>
 <text font-family="Arial" fill="#000000" transform="rotate(-299, -16.7854, 10.1323) translate(0, 24.1709)" style ="white-space:pre;" text-anchor="start" x="-16.7854" y="-14.0387" font-size="26.8566" ><![CDATA[]]></text>
@@ -5871,6 +5872,5 @@
 <text font-family="Arial" fill="#000000" transform="rotate(-299, -16.7854, 10.1323) translate(0, 24.1709)" style ="white-space:pre;" text-anchor="start" x="-16.7854" y="-14.0387" font-size="26.8566" ><![CDATA[]]></text>
 <path d="M 485.8601,587.1827 L 595.4228,105.9004 L 287.7928,491.9639 L 732.4525,277.7216 L 238.9626,277.7216 L 683.6223,491.9639 L 375.9923,105.9004 Z" stroke="#FFFFFF" stroke-width="1px"  stroke-linecap="round"  stroke-linejoin="round"  fill="#FF0000" />
 <path d="M 485.8601,80.8750 L 375.9923,562.1573 L 683.6223,176.0938 L 238.9626,390.3361 L 732.4525,390.3361 L 287.7928,176.0938 L 595.4228,562.1573 Z" stroke="#000000" stroke-width="1px"  stroke-linecap="round"  stroke-linejoin="round"  fill="#00FF00" />
-</g>
 </g>
 </svg>

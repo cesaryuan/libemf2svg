@@ -76,6 +76,45 @@ static void image_draw_start(FILE *out, const imageDestBox *box) {
     }
 }
 
+/**
+  \brief Close a pending SVG transform group before emitting a bitmap image.
+
+  Some EMF+ fallback bitmap records already store device-space destinations.
+  When that destination matches the record bounds, keeping an earlier SVG
+  transform group open applies the transform a second time and moves the image
+  outside the canvas, as in textured-mesh-renderings.emf.
+  */
+static bool image_dest_matches_bounds(const imageDestBox *box, U_RECTL bounds) {
+    const double tolerance = 1.0;
+    double left = fmin((double)bounds.left, (double)bounds.right);
+    double right = fmax((double)bounds.left, (double)bounds.right);
+    double top = fmin((double)bounds.top, (double)bounds.bottom);
+    double bottom = fmax((double)bounds.top, (double)bounds.bottom);
+    double box_right = box->position.x + box->size.x;
+    double box_bottom = box->position.y + box->size.y;
+
+    return fabs(box->position.x - left) <= tolerance &&
+           fabs(box_right - right) <= tolerance &&
+           fabs(box->position.y - top) <= tolerance &&
+           fabs(box_bottom - bottom) <= tolerance;
+}
+
+/**
+  \brief Close a pending transform only for device-space bitmap fallbacks.
+
+  Local-space bitmaps, such as test-155.emf, need the current world transform to
+  scale the image into its record bounds, so this must not close unconditionally.
+  */
+static void image_close_transform_group_if_device_box(FILE *out,
+                                                      drawingStates *states,
+                                                      const imageDestBox *box,
+                                                      U_RECTL bounds) {
+    if (states->transform_open && image_dest_matches_bounds(box, bounds)) {
+        fprintf(out, "</%sg>\n", states->nameSpaceString);
+        states->transform_open = false;
+    }
+}
+
 void U_EMRALPHABLEND_draw(const char *contents, FILE *out,
                           drawingStates *states) {
     FLAG_PARTIAL;
@@ -103,6 +142,8 @@ void U_EMRALPHABLEND_draw(const char *contents, FILE *out,
     imageDestBox box;
     image_dest_box(states, pEmr->Dest, pEmr->cDest, pEmr->cSrc.x,
                    pEmr->cSrc.y, &box);
+    image_close_transform_group_if_device_box(out, states, &box,
+                                              pEmr->rclBounds);
     image_draw_start(out, &box);
 
     float alpha = (float)pEmr->Blend.Global / 255.0;
@@ -175,6 +216,8 @@ void U_EMRBITBLT_draw(const char *contents, FILE *out, drawingStates *states) {
     imageDestBox box;
     image_dest_box(states, pEmr->Dest, pEmr->cDest, fabs((double)pEmr->cDest.x),
                    fabs((double)pEmr->cDest.y), &box);
+    image_close_transform_group_if_device_box(out, states, &box,
+                                              pEmr->rclBounds);
     image_draw_start(out, &box);
     clipset_draw(states, out);
 
@@ -232,6 +275,8 @@ void U_EMRSTRETCHBLT_draw(const char *contents, FILE *out,
     imageDestBox box;
     image_dest_box(states, pEmr->Dest, pEmr->cDest, pEmr->cSrc.x,
                    pEmr->cSrc.y, &box);
+    image_close_transform_group_if_device_box(out, states, &box,
+                                              pEmr->rclBounds);
     image_draw_start(out, &box);
     clipset_draw(states, out);
 
@@ -265,6 +310,8 @@ void U_EMRSTRETCHDIBITS_draw(const char *contents, FILE *out,
     imageDestBox box;
     image_dest_box(states, pEmr->Dest, pEmr->cDest, pEmr->cSrc.x,
                    pEmr->cSrc.y, &box);
+    image_close_transform_group_if_device_box(out, states, &box,
+                                              pEmr->rclBounds);
     image_draw_start(out, &box);
     clipset_draw(states, out);
 
