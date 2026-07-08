@@ -6217,8 +6217,8 @@ int U_PMF_LINEPATH_get(const char *contents, int32_t *Size, const char **Data, c
 int U_PMF_METAFILE_get(const char *contents, uint32_t *Type, uint32_t *Size, const char **Data, const char *blimit){
     if(!contents || !Type  || !Size  || !Data || !blimit){ return(0); }
     if(IS_MEM_UNSAFE(contents, sizeof(U_PMF_METAFILE), blimit))return(0);
-    U_PMF_SERIAL_get(&contents, &Type, 4, 1, U_LE);
-    U_PMF_SERIAL_get(&contents, &Size, 4, 1, U_LE);
+    U_PMF_SERIAL_get(&contents, Type, 4, 1, U_LE);
+    U_PMF_SERIAL_get(&contents, Size, 4, 1, U_LE);
     U_PMF_PTRSAV_SHIFT(Data, &contents, 0);
     return(1);
 }
@@ -6575,7 +6575,7 @@ int U_PMF_VARPOINTS_get(const char *contents, uint16_t Flags, int Elements, U_PM
    }
    else if(Flags & U_PPF_C){
       for(XF = YF = 0.0; Elements; Elements--, pts++){
-         if(!U_PMF_POINT_get(&contents, &XF, &XF, blimit))break; /* this should never happen */
+         if(!U_PMF_POINT_get(&contents, &XF, &YF, blimit))break; /* this should never happen */
          pts->X    = XF;
          pts->Y    = YF; 
       }

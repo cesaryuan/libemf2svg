@@ -12,6 +12,13 @@ extern "C" {
 
 // FIXME see emf2svg_clip_utils.c (clipping region AND/OR/XOR... not handle)
 
+/**
+  \brief Return whether a rectangle has no drawable area.
+  */
+static bool clip_rect_is_empty(U_RECTL rect) {
+    return rect.left == rect.right || rect.top == rect.bottom;
+}
+
 void U_EMREXCLUDECLIPRECT_draw(const char *contents, FILE *out,
                                drawingStates *states) {
     FLAG_PARTIAL;
@@ -77,6 +84,15 @@ void U_EMRINTERSECTCLIPRECT_draw(const char *contents, FILE *out,
     U_RECTL rect = pEmr->rclBox;
     U_POINT pt;
     PATH *new_path = NULL;
+
+    if (clip_rect_is_empty(rect) && states->currentDeviceContext.clipRGN) {
+        /*
+         * framework-overview.emf emits a zero-sized nested clip before an EMF+
+         * fallback bitmap. The current region combiner overwrites AND clips,
+         * so keep the existing outer clip instead of replacing it with empty.
+         */
+        return;
+    }
 
     add_new_seg(&new_path, SEG_MOVE);
     pt.x = rect.left;

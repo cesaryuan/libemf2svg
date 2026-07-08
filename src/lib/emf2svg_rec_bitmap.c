@@ -21,6 +21,11 @@ typedef struct {
     bool flip_y;
 } imageDestBox;
 
+typedef struct {
+    bool open;
+    bool moved_world_transform;
+} imageClipContext;
+
 /**
   \brief Return whether a bitmap axis must be mirrored in SVG output.
 
@@ -74,6 +79,161 @@ static void image_draw_start(FILE *out, const imageDestBox *box) {
 
         fprintf(out, "transform=\"translate(%.4f, %.4f) scale(%.4f, %.4f)\" ",
                 tx, ty, sx, sy);
+    }
+}
+
+/**
+  \brief Return whether the SVG image needs a local transform.
+  */
+static bool image_has_transform(const imageDestBox *box) {
+    return box->flip_x || box->flip_y;
+}
+
+/**
+  \brief Return whether the current world transform changes bitmap coordinates.
+  */
+static bool image_has_world_transform(drawingStates *states) {
+    U_XFORM transform = states->currentDeviceContext.worldTransform;
+
+    return transform.eM11 != 1.0 || transform.eM12 != 0.0 ||
+           transform.eM21 != 0.0 || transform.eM22 != 1.0 ||
+           transform.eDx != 0.0 || transform.eDy != 0.0;
+}
+
+/**
+  \brief Return whether two points match within bitmap clip tolerance.
+  */
+static bool image_point_matches(double x, double y, double expected_x,
+                                double expected_y) {
+    const double tolerance = 1.0;
+
+    return fabs(x - expected_x) <= tolerance && fabs(y - expected_y) <= tolerance;
+}
+
+/**
+  \brief Return which image-box corner a point matches.
+  */
+static unsigned image_box_corner_mask(const imageDestBox *box, POINT_D point) {
+    double left = box->position.x;
+    double top = box->position.y;
+    double right = box->position.x + box->size.x;
+    double bottom = box->position.y + box->size.y;
+
+    if (image_point_matches(point.x, point.y, left, top)) {
+        return 1;
+    }
+    if (image_point_matches(point.x, point.y, right, top)) {
+        return 2;
+    }
+    if (image_point_matches(point.x, point.y, right, bottom)) {
+        return 4;
+    }
+    if (image_point_matches(point.x, point.y, left, bottom)) {
+        return 8;
+    }
+    return 0;
+}
+
+/**
+  \brief Return whether the current clip is exactly the bitmap destination box.
+
+  Some samples, such as nerf-depth-maps.emf, set a clip that is identical to the
+  bitmap rectangle. Keep the existing image-level clip for stable output, but do
+  not wrap these no-op clips in an outer group.
+  */
+static bool image_clip_matches_box(drawingStates *states,
+                                   const imageDestBox *box) {
+    PATH *path = states->currentDeviceContext.clipRGN;
+    POINT_D vertices[5];
+    unsigned corner_mask = 0;
+    size_t index = 0;
+
+    for (; path != NULL; path = path->next) {
+        if (index == 0 && path->section.type != SEG_MOVE) {
+            return false;
+        }
+        if (index > 0 && index < 5 && path->section.type != SEG_LINE) {
+            return false;
+        }
+        if (index == 5) {
+            return path->section.type == SEG_END && path->next == NULL &&
+                   image_point_matches(vertices[0].x, vertices[0].y,
+                                       vertices[4].x, vertices[4].y) &&
+                   corner_mask == 15;
+        }
+        if (index > 5 || path->section.type == SEG_END ||
+            path->section.points == NULL) {
+            return false;
+        }
+
+        vertices[index] = path->section.points[0];
+        corner_mask |= image_box_corner_mask(box, vertices[index]);
+        index++;
+    }
+
+    return false;
+}
+
+/**
+  \brief Start an outer clip group for transformed bitmap images.
+
+  SVG applies an element's active transform to its clip-path. For transformed
+  STRETCHDIBITS records, such as framework-overview.emf's cropped depth-map
+  images, that makes the page-space clip rectangle cut the wrong area. Wrapping
+  the transformed image in a clipped group keeps the clip in page coordinates.
+  */
+static imageClipContext image_clip_group_start(FILE *out, drawingStates *states,
+                                               const imageDestBox *box) {
+    imageClipContext context = {false, false};
+
+    if (!states->currentDeviceContext.clipID) {
+        return context;
+    }
+
+    if (image_clip_matches_box(states, box)) {
+        return context;
+    }
+
+    context.moved_world_transform =
+        states->transform_open && image_has_world_transform(states);
+    if (!image_has_transform(box) && !context.moved_world_transform) {
+        return context;
+    }
+
+    if (context.moved_world_transform) {
+        fprintf(out, "</%sg>\n", states->nameSpaceString);
+        states->transform_open = false;
+    }
+
+    fprintf(out, "<%sg", states->nameSpaceString);
+    clipset_draw(states, out);
+    fprintf(out, ">\n");
+    context.open = true;
+
+    if (context.moved_world_transform) {
+        transform_draw(states, out);
+    }
+    return context;
+}
+
+/**
+  \brief Close an outer bitmap clip group if one was opened.
+  */
+static void image_clip_group_end(FILE *out, drawingStates *states,
+                                 imageClipContext context) {
+    if (!context.open) {
+        return;
+    }
+
+    if (context.moved_world_transform && states->transform_open) {
+        fprintf(out, "</%sg>\n", states->nameSpaceString);
+        states->transform_open = false;
+    }
+
+    fprintf(out, "</%sg>\n", states->nameSpaceString);
+
+    if (context.moved_world_transform) {
+        transform_draw(states, out);
     }
 }
 
@@ -220,11 +380,15 @@ void bitmap_rop_mask_flush(FILE *out, drawingStates *states) {
 
     image_box_from_pending(mask, &box);
     image_close_transform_group_if_device_box(out, states, &box, mask->bounds);
+    imageClipContext clip_context = image_clip_group_start(out, states, &box);
     image_draw_start(out, &box);
-    clipset_draw(states, out);
+    if (!clip_context.open) {
+        clipset_draw(states, out);
+    }
     dib_img_writer(mask->contents, out, states, mask->bmi, mask->bits,
                    mask->bits_size, false);
     fprintf(out, "/>\n");
+    image_clip_group_end(out, states, clip_context);
     bitmap_rop_mask_clear(states);
 }
 
@@ -257,15 +421,19 @@ void U_EMRALPHABLEND_draw(const char *contents, FILE *out,
                    pEmr->cSrc.y, &box);
     image_close_transform_group_if_device_box(out, states, &box,
                                               pEmr->rclBounds);
+    imageClipContext clip_context = image_clip_group_start(out, states, &box);
     image_draw_start(out, &box);
 
     float alpha = (float)pEmr->Blend.Global / 255.0;
     fprintf(out, " fill-opacity=\"%.4f\" ", alpha);
-    clipset_draw(states, out);
+    if (!clip_context.open) {
+        clipset_draw(states, out);
+    }
 
     dib_img_writer(contents, out, states, BmiSrc, BmpSrc,
                    (size_t)pEmr->cbBitsSrc, false);
     fprintf(out, "/>\n");
+    image_clip_group_end(out, states, clip_context);
 }
 void U_EMRBITBLT_draw(const char *contents, FILE *out, drawingStates *states) {
     FLAG_PARTIAL;
@@ -331,8 +499,11 @@ void U_EMRBITBLT_draw(const char *contents, FILE *out, drawingStates *states) {
                    fabs((double)pEmr->cDest.y), &box);
     image_close_transform_group_if_device_box(out, states, &box,
                                               pEmr->rclBounds);
+    imageClipContext clip_context = image_clip_group_start(out, states, &box);
     image_draw_start(out, &box);
-    clipset_draw(states, out);
+    if (!clip_context.open) {
+        clipset_draw(states, out);
+    }
 
     // float alpha = (float)pEmr->Blend.Global / 255.0;
     // fprintf(out, " fill-opacity=\"%.4f\" ", alpha);
@@ -340,6 +511,7 @@ void U_EMRBITBLT_draw(const char *contents, FILE *out, drawingStates *states) {
     dib_img_writer(contents, out, states, BmiSrc, BmpSrc,
                    (size_t)pEmr->cbBitsSrc, false);
     fprintf(out, "/>\n");
+    image_clip_group_end(out, states, clip_context);
 }
 void U_EMRMASKBLT_draw(const char *contents, FILE *out, drawingStates *states) {
     FLAG_IGNORED;
@@ -390,12 +562,16 @@ void U_EMRSTRETCHBLT_draw(const char *contents, FILE *out,
                    pEmr->cSrc.y, &box);
     image_close_transform_group_if_device_box(out, states, &box,
                                               pEmr->rclBounds);
+    imageClipContext clip_context = image_clip_group_start(out, states, &box);
     image_draw_start(out, &box);
-    clipset_draw(states, out);
+    if (!clip_context.open) {
+        clipset_draw(states, out);
+    }
 
     dib_img_writer(contents, out, states, BmiSrc, BmpSrc,
                    (size_t)pEmr->cbBitsSrc, false);
     fprintf(out, "/>\n");
+    image_clip_group_end(out, states, clip_context);
 }
 
 /**
@@ -595,8 +771,11 @@ void U_EMRSTRETCHDIBITS_draw(const char *contents, FILE *out,
 
     image_close_transform_group_if_device_box(out, states, &box,
                                               pEmr->rclBounds);
+    imageClipContext clip_context = image_clip_group_start(out, states, &box);
     image_draw_start(out, &box);
-    clipset_draw(states, out);
+    if (!clip_context.open) {
+        clipset_draw(states, out);
+    }
 
     if (use_pending_mask &&
         dib_masked_img_writer(out, states, BmiSrc, BmpSrc,
@@ -611,6 +790,7 @@ void U_EMRSTRETCHDIBITS_draw(const char *contents, FILE *out,
                        (size_t)pEmr->cbBitsSrc, false);
     }
     fprintf(out, "/>\n");
+    image_clip_group_end(out, states, clip_context);
 }
 void U_EMRTRANSPARENTBLT_draw(const char *contents, FILE *out,
                               drawingStates *states) {
