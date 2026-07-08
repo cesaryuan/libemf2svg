@@ -1927,12 +1927,17 @@ static int charset_text_to_utf8(char *in, size_t size_in, char **out,
     return enc_to_utf8(in, size_in, out, out_len, (char *)encoding);
 }
 
-/* Draw per-character tspans when EMF supplies explicit Dx advances. */
-static void text_positioned_chars_draw(char *contents, FILE *out,
+/*
+ * Draw per-character tspans when EMF supplies explicit Dx advances.
+ * Returns true when any character could not be converted and had to be emitted
+ * as empty text, which lets the caller warn only for real conversion failures.
+ */
+static bool text_positioned_chars_draw(char *contents, FILE *out,
                                        drawingStates *states, uint8_t type,
                                        uint32_t chars,
                                        const double *positions) {
     uint32_t i;
+    bool emitted_empty_text = false;
 
     for (i = 0; i < chars; i++) {
         char *string = NULL;
@@ -1950,9 +1955,18 @@ static void text_positioned_chars_draw(char *contents, FILE *out,
             free(string);
         } else {
             fprintf(out, "<![CDATA[]]>");
+            emitted_empty_text = true;
         }
         fprintf(out, "</%stspan>", states->nameSpaceString);
     }
+    return emitted_empty_text;
+}
+
+/* Warn when glyph-index text could not be mapped back to Unicode text. */
+static void text_glyph_index_empty_warn(void) {
+    fprintf(stderr,
+            "WARNING: U_ETO_GLYPH_INDEX text is not supported; emitting "
+            "empty SVG text.\n");
 }
 
 /* Draw DBCS text at the lead-byte origin; the trail byte is only decoded. */
@@ -2153,22 +2167,17 @@ void text_draw(const char *contents, FILE *out, drawingStates *states,
 
     char *string = NULL;
     size_t string_size;
-    if (pemt->fOptions & U_ETO_GLYPH_INDEX) {
-        /* U_ETO_GLYPH_INDEX stores font-specific glyph IDs, not text. */
-        fprintf(stderr,
-                "WARNING: U_ETO_GLYPH_INDEX text is not supported; emitting "
-                "empty SVG text.\n");
-        type = FONTINDEX;
-    }
+    bool emitted_empty_glyph_index_text = false;
     if (positions != NULL) {
         if (text_charset_is_multibyte(states)) {
             text_positioned_multibyte_chars_draw(
                 (char *)(contents + pemt->offString), out, states,
                 pemt->nChars, positions);
         } else {
-            text_positioned_chars_draw((char *)(contents + pemt->offString),
-                                       out, states, type, pemt->nChars,
-                                       positions);
+            emitted_empty_glyph_index_text =
+                text_positioned_chars_draw((char *)(contents + pemt->offString),
+                                           out, states, type, pemt->nChars,
+                                           positions);
         }
         free(positions);
     } else {
@@ -2180,7 +2189,11 @@ void text_draw(const char *contents, FILE *out, drawingStates *states,
             free(string);
         } else {
             fprintf(out, "<![CDATA[]]>");
+            emitted_empty_glyph_index_text = true;
         }
+    }
+    if (type == FONTINDEX && emitted_empty_glyph_index_text) {
+        text_glyph_index_empty_warn();
     }
     fprintf(out, "</%stext>\n", states->nameSpaceString);
 }
