@@ -13,6 +13,29 @@ extern "C" {
 #include <stdio.h>
 #include <stdlib.h>
 
+typedef struct {
+    POINT_D position;
+    POINT_D size;
+    bool flip_x;
+    bool flip_y;
+} imageDestBox;
+
+/**
+  \brief Return whether a bitmap axis must be mirrored in SVG output.
+
+  StretchDIBits mirrors an image when source and destination extents have
+  opposite signs. This preserves that sign information for files such as
+  nerf-depth-maps.emf, where cDest.y is negative and the image otherwise renders
+  upside down after conversion.
+  */
+static bool image_axis_flipped(double src_extent, double dest_start,
+                               double dest_end) {
+    bool source_reversed = src_extent < 0.0;
+    bool destination_reversed = dest_end < dest_start;
+
+    return source_reversed != destination_reversed;
+}
+
 /**
   \brief Convert an EMF destination point and extent into an SVG image box.
 
@@ -21,24 +44,36 @@ extern "C" {
   size and shrink images like those in test-164.emf.
   */
 static void image_dest_box(drawingStates *states, U_POINTL dest, U_POINTL cDest,
-                           POINT_D *position, POINT_D *size) {
+                           double cSrcX, double cSrcY, imageDestBox *box) {
     POINT_D corner_a = point_cal(states, (double)dest.x, (double)dest.y);
     POINT_D corner_b =
         point_cal(states, (double)(dest.x + cDest.x), (double)(dest.y + cDest.y));
 
-    position->x = fmin(corner_a.x, corner_b.x);
-    position->y = fmin(corner_a.y, corner_b.y);
-    size->x = fabs(corner_b.x - corner_a.x);
-    size->y = fabs(corner_b.y - corner_a.y);
+    box->position.x = fmin(corner_a.x, corner_b.x);
+    box->position.y = fmin(corner_a.y, corner_b.y);
+    box->size.x = fabs(corner_b.x - corner_a.x);
+    box->size.y = fabs(corner_b.y - corner_a.y);
+    box->flip_x = image_axis_flipped(cSrcX, corner_a.x, corner_b.x);
+    box->flip_y = image_axis_flipped(cSrcY, corner_a.y, corner_b.y);
 }
 
 /**
   \brief Start an SVG image element for a bitmap draw.
   */
-static void image_draw_start(FILE *out, POINT_D size, POINT_D position) {
+static void image_draw_start(FILE *out, const imageDestBox *box) {
     fprintf(out,
             "<image width=\"%.4f\" height=\"%.4f\" x=\"%.4f\" y=\"%.4f\" ",
-            size.x, size.y, position.x, position.y);
+            box->size.x, box->size.y, box->position.x, box->position.y);
+
+    if (box->flip_x || box->flip_y) {
+        double tx = box->flip_x ? 2.0 * box->position.x + box->size.x : 0.0;
+        double ty = box->flip_y ? 2.0 * box->position.y + box->size.y : 0.0;
+        double sx = box->flip_x ? -1.0 : 1.0;
+        double sy = box->flip_y ? -1.0 : 1.0;
+
+        fprintf(out, "transform=\"translate(%.4f, %.4f) scale(%.4f, %.4f)\" ",
+                tx, ty, sx, sy);
+    }
 }
 
 void U_EMRALPHABLEND_draw(const char *contents, FILE *out,
@@ -65,10 +100,10 @@ void U_EMRALPHABLEND_draw(const char *contents, FILE *out,
     const unsigned char *BmpSrc =
         (const unsigned char *)(contents + pEmr->offBitsSrc);
 
-    POINT_D size;
-    POINT_D position;
-    image_dest_box(states, pEmr->Dest, pEmr->cDest, &position, &size);
-    image_draw_start(out, size, position);
+    imageDestBox box;
+    image_dest_box(states, pEmr->Dest, pEmr->cDest, pEmr->cSrc.x,
+                   pEmr->cSrc.y, &box);
+    image_draw_start(out, &box);
 
     float alpha = (float)pEmr->Blend.Global / 255.0;
     fprintf(out, " fill-opacity=\"%.4f\" ", alpha);
@@ -137,10 +172,10 @@ void U_EMRBITBLT_draw(const char *contents, FILE *out, drawingStates *states) {
     const unsigned char *BmpSrc =
         (const unsigned char *)(contents + pEmr->offBitsSrc);
 
-    POINT_D size;
-    POINT_D position;
-    image_dest_box(states, pEmr->Dest, pEmr->cDest, &position, &size);
-    image_draw_start(out, size, position);
+    imageDestBox box;
+    image_dest_box(states, pEmr->Dest, pEmr->cDest, fabs((double)pEmr->cDest.x),
+                   fabs((double)pEmr->cDest.y), &box);
+    image_draw_start(out, &box);
     clipset_draw(states, out);
 
     // float alpha = (float)pEmr->Blend.Global / 255.0;
@@ -194,10 +229,10 @@ void U_EMRSTRETCHBLT_draw(const char *contents, FILE *out,
     const unsigned char *BmpSrc =
         (const unsigned char *)(contents + pEmr->offBitsSrc);
 
-    POINT_D size;
-    POINT_D position;
-    image_dest_box(states, pEmr->Dest, pEmr->cDest, &position, &size);
-    image_draw_start(out, size, position);
+    imageDestBox box;
+    image_dest_box(states, pEmr->Dest, pEmr->cDest, pEmr->cSrc.x,
+                   pEmr->cSrc.y, &box);
+    image_draw_start(out, &box);
     clipset_draw(states, out);
 
     dib_img_writer(contents, out, states, BmiSrc, BmpSrc,
@@ -227,10 +262,10 @@ void U_EMRSTRETCHDIBITS_draw(const char *contents, FILE *out,
     const unsigned char *BmpSrc =
         (const unsigned char *)(contents + pEmr->offBitsSrc);
 
-    POINT_D size;
-    POINT_D position;
-    image_dest_box(states, pEmr->Dest, pEmr->cDest, &position, &size);
-    image_draw_start(out, size, position);
+    imageDestBox box;
+    image_dest_box(states, pEmr->Dest, pEmr->cDest, pEmr->cSrc.x,
+                   pEmr->cSrc.y, &box);
+    image_draw_start(out, &box);
     clipset_draw(states, out);
 
     dib_img_writer(contents, out, states, BmiSrc, BmpSrc,
