@@ -286,6 +286,10 @@ int U_emf_onerec_draw(const char *contents, const char *blimit, int recnum,
         contents + size - 1 < contents)
         return (-1);
 
+    if (lpEMFR->iType != U_EMR_STRETCHDIBITS) {
+        bitmap_rop_mask_flush(out, states);
+    }
+
     switch (lpEMFR->iType) {
     case U_EMR_HEADER:
         U_EMRHEADER_draw(contents, out, states);

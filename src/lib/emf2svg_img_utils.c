@@ -35,8 +35,15 @@ float get_pixel_size(uint32_t colortype) {
     return 4;
 }
 
-/* Attempts to save PNG to file; returns 0 on success, non-zero on error. */
-int rgb2png(RGBABitmap *bitmap, char ** fm_out, size_t * fm_out_length) {
+/*
+  Attempts to save PNG to file; returns 0 on success, non-zero on error.
+  The opaque_if_alpha_empty flag preserves the legacy DIB behavior where an
+  all-zero alpha channel means "no alpha data", while allowing composed masks to
+  keep a genuinely transparent all-zero alpha result.
+*/
+int rgb2png_with_alpha_mode(RGBABitmap *bitmap, char **fm_out,
+                            size_t *fm_out_length,
+                            bool opaque_if_alpha_empty) {
     fmem fm;
     fmem_init(&fm);
     *fm_out = NULL;
@@ -96,7 +103,7 @@ int rgb2png(RGBABitmap *bitmap, char ** fm_out, size_t * fm_out_length) {
         uint8_t *row = png_malloc(png_ptr, sizeof(uint8_t) * bitmap->width * 4);
         // row_pointers[y] = (png_byte *)row;
         row_pointers[bitmap->height - y - 1] = row;
-        if (alpha_channel_empty) {
+        if (alpha_channel_empty && opaque_if_alpha_empty) {
             for (x = 0; x < bitmap->width; ++x) {
                 // RGBPixel *color = pixel_at(bitmap, x, y);
                 RGBAPixel color = bitmap->pixels[((x + bitmap->width * y))];
@@ -147,6 +154,11 @@ int rgb2png(RGBABitmap *bitmap, char ** fm_out, size_t * fm_out_length) {
     fclose(fp);
     fmem_term(&fm);
     return (*fm_out)?0:-1;
+}
+
+/* Attempts to save PNG to file; returns 0 on success, non-zero on error. */
+int rgb2png(RGBABitmap *bitmap, char **fm_out, size_t *fm_out_length) {
+    return rgb2png_with_alpha_mode(bitmap, fm_out, fm_out_length, true);
 }
 
 // uncompress RLE8 to get bitmap (section 3.1.6.2 [MS-WMF].pdf)

@@ -55,6 +55,8 @@ typedef struct _RGBABitmap {
 } RGBABitmap;
 
 int rgb2png(RGBABitmap *bitmap, char **out, size_t *size);
+int rgb2png_with_alpha_mode(RGBABitmap *bitmap, char **out, size_t *size,
+                            bool opaque_if_alpha_empty);
 float get_pixel_size(uint32_t colortype);
 RGBBitmap rle4ToRGB(RGBBitmap img);
 RGBBitmap RGB4ToRGB8(RGBBitmap img);

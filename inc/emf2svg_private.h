@@ -249,6 +249,21 @@ typedef struct imageLibrary {
     struct imageLibrary *next;
 } emfImageLibrary;
 
+typedef struct bitmapRopMask {
+    bool active;
+    POINT_D position;
+    POINT_D size;
+    bool flip_x;
+    bool flip_y;
+    U_RECTL bounds;
+    const char *contents;
+    PU_BITMAPINFOHEADER bmi;
+    const unsigned char *bits;
+    size_t bits_size;
+    uint32_t width;
+    uint32_t height;
+} bitmapRopMask;
+
 // structure recording drawing states
 typedef struct {
     // unique ID (simple increment)
@@ -326,6 +341,8 @@ typedef struct {
     // image library for pattern support
     int count_images;
     emfImageLibrary *library;
+    // pending 1bpp SRCPAINT mask for the following SRCAND bitmap draw
+    bitmapRopMask pendingBitmapMask;
 } drawingStates;
 
 typedef struct cmap_collection {
@@ -631,6 +648,7 @@ void U_EMRCREATECOLORSPACEW_draw(const char *contents, FILE *out,
                                  drawingStates *states);
 int U_emf_onerec_draw(const char *contents, const char *blimit, int recnum,
                       size_t off, FILE *out, drawingStates *states);
+void bitmap_rop_mask_flush(FILE *out, drawingStates *states);
 void dib_img_writer(const char *contents, FILE *out, drawingStates *states,
                     PU_BITMAPINFOHEADER BmiSrc, const unsigned char *BmpSrc,
                     size_t size, bool assign_mono_colors_from_dc);
