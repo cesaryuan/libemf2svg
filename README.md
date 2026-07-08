@@ -269,6 +269,56 @@ EMF+ RECORDS:
 | Ignored   |   85  | [ 100%] |
 | Total     |   85  |         |
 
+Current status and recent work
+------------------------------
+
+The `ChangeLogs` section below lists the historical upstream releases. For
+readers who want a quick view of what is already included in this checkout,
+the following summary separates the upstream base from the extra work carried
+in this fork.
+
+Upstream `kakwa/libemf2svg` base already included here:
+
+* Cross-platform build and packaging improvements, including MSVC native
+  builds, Alpine Linux support, arm64 Linux/macOS CI targets, and optional
+  use of a system `libuemf` with `-DUSE_SYSTEM_LIBUEMF=ON`.
+* Text and font handling fixes such as reverse font-encoding crash fixes,
+  font-index handling, and the `fontconfig` plus `freetype` based text path
+  needed for documents that use indexed glyph text.
+* Rendering fixes for incorrect polygon fill behavior, malformed
+  Y-coordinate transforms from some Wine-generated EMFs, missing initial
+  viewport setup, alpha bitmap handling, brush patterns, text orientation,
+  and space-preserving text rendering.
+
+Additional fixes and features in this fork (`cesaryuan/libemf2svg`):
+
+* Added a full WMF pipeline on top of the EMF converter:
+  `wmf2emf()` in the library, the `wmf2emf-conv` CLI, WMF fixture coverage,
+  WMF snapshot baselines, and the WebAssembly export
+  `_wmf2svg_wasm_convert` for direct WMF-to-SVG conversion in wasm builds.
+* Fixed multiple WMF text and MathType/Equation rendering problems, including
+  ANSI accent corruption, GB2312 and other multibyte charset decoding,
+  WMF font-face encoding conversion, character-set mapping, incorrect text
+  advance after drawing, SaveDC or RestoreDC mapping-state restoration,
+  positive `LOGFONT` height handling, symbol-font range detection, and
+  over-shrunk equation font heights in the WMF -> EMF -> SVG path.
+* Fixed SVG text emission issues such as incorrect warning timing for
+  `U_ETO_GLYPH_INDEX`, missing or incorrect font-family escaping, and an
+  earlier width-scaling transform that distorted positioned text.
+* Fixed bitmap and image rendering bugs, including transformed destination
+  size calculation, mirrored output from negative bitmap extents, misplaced
+  image or line transform groups, transparency handling, and bitmap clipping
+  or PMF parsing regressions.
+* Fixed drawing and serialization bugs such as `BEGINPATH` followed by
+  `LINETO` path serialization, unsupported-object handle reservation in the
+  WMF bridge, pen-width copying, and inherited clipping-state mistakes.
+* Added or improved regression tooling with committed EMF and WMF SVG
+  snapshots, default `save` or `check` coverage for both formats, compact
+  changed-file reporting, changed or total counters, and
+  `--detail-diff <sample>` for inspecting one mismatching snapshot in detail.
+* Added EMF+ image coverage for `DrawImagePoints`, which fixes one important
+  class of picture placement cases that previously rendered incorrectly.
+
 ChangeLogs
 ----------
 
