@@ -264,6 +264,14 @@ typedef struct bitmapRopMask {
     uint32_t height;
 } bitmapRopMask;
 
+typedef struct emfPlusImageBox {
+    bool active;
+    POINT_D position;
+    POINT_D size;
+} emfPlusImageBox;
+
+#define EMFPLUS_RECENT_IMAGE_BOX_COUNT 8
+
 // structure recording drawing states
 typedef struct {
     // unique ID (simple increment)
@@ -343,6 +351,9 @@ typedef struct {
     emfImageLibrary *library;
     // pending 1bpp SRCPAINT mask for the following SRCAND bitmap draw
     bitmapRopMask pendingBitmapMask;
+    // Recently emitted EMF+ bitmap boxes used to suppress matching GDI fallback.
+    emfPlusImageBox recentEmfPlusImages[EMFPLUS_RECENT_IMAGE_BOX_COUNT];
+    size_t recentEmfPlusImageNext;
 } drawingStates;
 
 typedef struct cmap_collection {

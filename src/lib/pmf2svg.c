@@ -28,13 +28,345 @@ extern "C" {
 #endif
 
 #include "emf2svg_private.h"
+#include "emf2svg.h"
 #include "pmf2svg.h"
+#include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 //! \cond
 
 #define UNUSED(x)                                                              \
     (void)(x) //! Please ignore - Doxygen simply insisted on including this
+
+typedef struct {
+    bool active;
+    char *data;
+    size_t size;
+} pmfImageCacheEntry;
+
+static pmfImageCacheEntry pmf_image_cache[64];
+static U_XFORM pmf_world_transform = {1.0, 0.0, 0.0, 1.0, 0.0, 0.0};
+static int pmf_metafile_depth = 0;
+static drawingStates *pmf_parent_bitmap_box_states = NULL;
+
+/**
+  \brief Reset the EMF+ world transform used by DrawImagePoints.
+  */
+static void pmf_world_transform_reset(void) {
+    pmf_world_transform.eM11 = 1.0;
+    pmf_world_transform.eM12 = 0.0;
+    pmf_world_transform.eM21 = 0.0;
+    pmf_world_transform.eM22 = 1.0;
+    pmf_world_transform.eDx = 0.0;
+    pmf_world_transform.eDy = 0.0;
+}
+
+/**
+  \brief Clear cached EMF+ image objects.
+
+  EMF+ DrawImagePoints refers to images by object ID. The cache is reset at EMF+
+  headers and EOF so recursive metafile rendering does not reuse stale objects.
+  */
+static void pmf_image_cache_clear(void) {
+    pmf_world_transform_reset();
+    for (size_t i = 0; i < sizeof(pmf_image_cache) / sizeof(pmf_image_cache[0]);
+         i++) {
+        free(pmf_image_cache[i].data);
+        pmf_image_cache[i].data = NULL;
+        pmf_image_cache[i].size = 0;
+        pmf_image_cache[i].active = false;
+    }
+}
+
+/**
+  \brief Store a completed EMF+ Image object for later DrawImagePoints records.
+  */
+static int pmf_image_cache_store(uint32_t id, const char *data, size_t size) {
+    if (id >= sizeof(pmf_image_cache) / sizeof(pmf_image_cache[0]) ||
+        data == NULL || size == 0) {
+        return 0;
+    }
+
+    char *copy = (char *)malloc(size);
+    if (copy == NULL) {
+        return 0;
+    }
+    memcpy(copy, data, size);
+
+    free(pmf_image_cache[id].data);
+    pmf_image_cache[id].data = copy;
+    pmf_image_cache[id].size = size;
+    pmf_image_cache[id].active = true;
+    return 1;
+}
+
+/**
+  \brief Return a cached EMF+ Image object by object ID.
+  */
+static const pmfImageCacheEntry *pmf_image_cache_get(uint32_t id) {
+    if (id >= sizeof(pmf_image_cache) / sizeof(pmf_image_cache[0]) ||
+        !pmf_image_cache[id].active) {
+        return NULL;
+    }
+    return &pmf_image_cache[id];
+}
+
+/**
+  \brief Return the MIME type for an EMF+ compressed image payload.
+  */
+static const char *pmf_image_mime_type(const unsigned char *data, size_t size) {
+    if (size >= 8 && memcmp(data, "\x89PNG\r\n\x1a\n", 8) == 0) {
+        return "image/png";
+    }
+    if (size >= 3 && data[0] == 0xff && data[1] == 0xd8 &&
+        data[2] == 0xff) {
+        return "image/jpeg";
+    }
+    if (size >= 6 && (memcmp(data, "GIF87a", 6) == 0 ||
+                      memcmp(data, "GIF89a", 6) == 0)) {
+        return "image/gif";
+    }
+    return "application/octet-stream";
+}
+
+/**
+  \brief Calculate the affine transform described by DrawImagePoints.
+  */
+static void pmf_image_transform_matrix(const U_PMF_RECTF *src,
+                                       const U_PMF_POINTF *points, double *ma,
+                                       double *mb, double *mc, double *md,
+                                       double *me, double *mf) {
+    double src_w = src->Width == 0.0 ? 1.0 : src->Width;
+    double src_h = src->Height == 0.0 ? 1.0 : src->Height;
+    double a = (points[1].X - points[0].X) / src_w;
+    double b = (points[1].Y - points[0].Y) / src_w;
+    double c = (points[2].X - points[0].X) / src_h;
+    double d = (points[2].Y - points[0].Y) / src_h;
+    double e = points[0].X - a * src->X - c * src->Y;
+    double f = points[0].Y - b * src->X - d * src->Y;
+    double wa = pmf_world_transform.eM11;
+    double wb = pmf_world_transform.eM12;
+    double wc = pmf_world_transform.eM21;
+    double wd = pmf_world_transform.eM22;
+    double we = pmf_world_transform.eDx;
+    double wf = pmf_world_transform.eDy;
+    *ma = wa * a + wc * b;
+    *mb = wb * a + wd * b;
+    *mc = wa * c + wc * d;
+    *md = wb * c + wd * d;
+    *me = wa * e + wc * f + we;
+    *mf = wb * e + wd * f + wf;
+}
+
+/**
+  \brief Write the affine transform described by DrawImagePoints.
+  */
+static void pmf_image_transform_draw(FILE *out, const U_PMF_RECTF *src,
+                                     const U_PMF_POINTF *points) {
+    double ma, mb, mc, md, me, mf;
+    pmf_image_transform_matrix(src, points, &ma, &mb, &mc, &md, &me, &mf);
+
+    fprintf(out, " transform=\"matrix(%.4f %.4f %.4f %.4f %.4f %.4f)\" ",
+            ma, mb, mc, md, me, mf);
+}
+
+/**
+  \brief Store one emitted EMF+ bitmap box in a drawing state.
+  */
+static void pmf_image_box_store(drawingStates *states, double min_x,
+                                double min_y, double max_x, double max_y) {
+    emfPlusImageBox *box;
+
+    box = &states->recentEmfPlusImages[states->recentEmfPlusImageNext %
+                                       EMFPLUS_RECENT_IMAGE_BOX_COUNT];
+    box->active = true;
+    box->position.x = min_x;
+    box->position.y = min_y;
+    box->size.x = max_x - min_x;
+    box->size.y = max_y - min_y;
+    states->recentEmfPlusImageNext++;
+}
+
+/**
+  \brief Remember an emitted EMF+ bitmap box to suppress a matching GDI fallback.
+
+  PowerPoint can store the same bitmap once as EMF+ DrawImagePoints and again
+  as a following EMR_STRETCHDIBITS fallback. Recording only successfully emitted
+  compressed bitmaps avoids broad fallback skipping while fixing duplicated
+  depth maps in framework-overview.emf. For recursively drawn EMF+ metafiles,
+  the child bitmap box is also copied to the parent state in child coordinates,
+  because the parent's GDI fallback is emitted under the same local transform.
+  */
+static void pmf_image_box_record(const U_PMF_RECTF *src,
+                                 const U_PMF_POINTF *points,
+                                 drawingStates *states) {
+    double ma, mb, mc, md, me, mf;
+    double xs[4], ys[4];
+    double min_x, max_x, min_y, max_y;
+
+    pmf_image_transform_matrix(src, points, &ma, &mb, &mc, &md, &me, &mf);
+    xs[0] = ma * src->X + mc * src->Y + me;
+    ys[0] = mb * src->X + md * src->Y + mf;
+    xs[1] = ma * (src->X + src->Width) + mc * src->Y + me;
+    ys[1] = mb * (src->X + src->Width) + md * src->Y + mf;
+    xs[2] = ma * src->X + mc * (src->Y + src->Height) + me;
+    ys[2] = mb * src->X + md * (src->Y + src->Height) + mf;
+    xs[3] = ma * (src->X + src->Width) + mc * (src->Y + src->Height) + me;
+    ys[3] = mb * (src->X + src->Width) + md * (src->Y + src->Height) + mf;
+
+    min_x = max_x = xs[0];
+    min_y = max_y = ys[0];
+    for (size_t i = 1; i < 4; ++i) {
+        if (xs[i] < min_x)
+            min_x = xs[i];
+        if (xs[i] > max_x)
+            max_x = xs[i];
+        if (ys[i] < min_y)
+            min_y = ys[i];
+        if (ys[i] > max_y)
+            max_y = ys[i];
+    }
+
+    pmf_image_box_store(states, min_x, min_y, max_x, max_y);
+    if (pmf_parent_bitmap_box_states != NULL &&
+        pmf_parent_bitmap_box_states != states) {
+        pmf_image_box_store(pmf_parent_bitmap_box_states, min_x, min_y, max_x,
+                            max_y);
+    }
+}
+
+/**
+  \brief Draw a cached EMF+ bitmap image object.
+
+  PowerPoint stores some EMF+ fallback images as compressed PNG/JPEG bytes
+  inside Image objects. Drawing those bytes here restores bitmap-only EMF+
+  content such as framework-overview.emf's nested depth maps.
+  */
+static int pmf_bitmap_image_draw(const pmfImageCacheEntry *image,
+                                 const char *data, const char *blimit,
+                                 const U_PMF_RECTF *src,
+                                 const U_PMF_POINTF *points, FILE *out,
+                                 drawingStates *states) {
+    U_PMF_BITMAP bitmap;
+    const char *bitmap_data;
+    size_t offset;
+    size_t data_size;
+    size_t b64_size;
+    char *b64;
+
+    if (pmf_metafile_depth == 0) {
+        return 0;
+    }
+
+    if (!U_PMF_BITMAP_get(data, &bitmap, &bitmap_data, blimit)) {
+        return 0;
+    }
+    if (bitmap.Type != 1) {
+        return 0;
+    }
+
+    offset = (size_t)(bitmap_data - image->data);
+    if (offset >= image->size) {
+        return 0;
+    }
+    data_size = image->size - offset;
+    b64 = base64_encode((const unsigned char *)bitmap_data, data_size,
+                        &b64_size);
+    if (b64 == NULL) {
+        return 0;
+    }
+
+    fprintf(out, "<%simage x=\"%.4f\" y=\"%.4f\" width=\"%.4f\" "
+                 "height=\"%.4f\" ",
+            states->nameSpaceString, src->X, src->Y, src->Width, src->Height);
+    pmf_image_transform_draw(out, src, points);
+    fprintf(out, "xlink:href=\"data:%s;base64,%s\" />\n",
+            pmf_image_mime_type((const unsigned char *)bitmap_data, data_size),
+            b64);
+    pmf_image_box_record(src, points, states);
+    free(b64);
+    return 1;
+}
+
+/**
+  \brief Draw a cached EMF+ metafile image object by recursively converting it.
+  */
+static int pmf_metafile_image_draw(const char *data, const char *blimit,
+                                   const U_PMF_RECTF *src,
+                                   const U_PMF_POINTF *points, FILE *out,
+                                   drawingStates *states) {
+    uint32_t type;
+    uint32_t size;
+    const char *metafile_data;
+    char *metafile_copy;
+    char *svg = NULL;
+    size_t svg_len = 0;
+    generatorOptions options;
+    U_XFORM saved_world_transform = pmf_world_transform;
+    drawingStates *saved_parent_bitmap_box_states =
+        pmf_parent_bitmap_box_states;
+    int ok = 0;
+
+    if (!U_PMF_METAFILE_get(data, &type, &size, &metafile_data, blimit) ||
+        size == 0) {
+        return 0;
+    }
+
+    if (type == U_MDT_Emf) {
+        /*
+         * test-179.emf and test-180.emf contain a top-level EMF+ Image object
+         * that is a plain EMF preview. The surrounding EMF already contains the
+         * same GDI fallback records, so recursively drawing this object paints
+         * the main picture twice. Keep EMF+ only metafiles, which carry content
+         * that the GDI fallback does not reproduce.
+         */
+        verbose_printf("   Status:         %sSKIPPED EMF+ EMF METAFILE PREVIEW%s\n",
+                       KYEL, KNRM);
+        return 0;
+    }
+
+    metafile_copy = (char *)malloc(size);
+    if (metafile_copy == NULL) {
+        return 0;
+    }
+    memcpy(metafile_copy, metafile_data, size);
+
+    memset(&options, 0, sizeof(options));
+    options.verbose = false;
+    options.emfplus = true;
+    options.svgDelimiter = false;
+
+    pmf_parent_bitmap_box_states = states;
+    pmf_metafile_depth++;
+    int convert_ok = emf2svg(metafile_copy, size, &svg, &svg_len, &options);
+    pmf_metafile_depth--;
+    pmf_parent_bitmap_box_states = saved_parent_bitmap_box_states;
+    pmf_world_transform = saved_world_transform;
+
+    if (convert_ok != 0 && svg != NULL) {
+        const char *extra_close = "</g>\n";
+        size_t extra_close_len = strlen(extra_close);
+
+        if (svg_len >= extra_close_len &&
+            memcmp(svg + svg_len - extra_close_len, extra_close,
+                   extra_close_len) == 0) {
+            svg_len -= extra_close_len;
+            svg[svg_len] = '\0';
+        }
+
+        fprintf(out, "<%sg", states->nameSpaceString);
+        pmf_image_transform_draw(out, src, points);
+        fprintf(out, ">\n%.*s</%sg>\n", (int)svg_len, svg,
+                states->nameSpaceString);
+        ok = 1;
+    }
+
+    free(svg);
+    free(metafile_copy);
+    return ok;
+}
 
 /*
    this function is not visible in the API.  Print "data" for one of the many
@@ -108,6 +440,7 @@ int U_pmf_onerec_draw(const char *contents, const char *blimit, int recnum,
                                                  leaving the indexable part */
     if (type < U_PMR_MIN || type > U_PMR_MAX)
         return (-1); /* unknown EMF+ record type */
+
     status =
         U_PMF_CMN_HDR_draw(Header, recnum, off, out, states); /* EMF+ part */
 
@@ -120,11 +453,13 @@ int U_pmf_onerec_draw(const char *contents, const char *blimit, int recnum,
 
     switch (type) {
     case (U_PMR_HEADER):
+        pmf_image_cache_clear();
         U_PMR_HEADER_draw(contents, out, states);
         break;
     case (U_PMR_ENDOFFILE):
         U_PMR_ENDOFFILE_draw(contents, out, states);
         U_OA_release(&ObjCont);
+        pmf_image_cache_clear();
         break;
     case (U_PMR_COMMENT):
         U_PMR_COMMENT_draw(contents, out, states);
@@ -1489,8 +1824,68 @@ int U_PMR_DRAWIMAGE_draw(const char *contents, FILE *out,
   */
 int U_PMR_DRAWIMAGEPOINTS_draw(const char *contents, FILE *out,
                                drawingStates *states) {
-    int status = 1;
-    return (status);
+    uint32_t img_id;
+    int ctype;
+    int etype;
+    int rel_abs;
+    uint32_t img_attr_id;
+    int32_t src_unit;
+    U_PMF_RECTF src_rect;
+    uint32_t elements;
+    U_PMF_POINTF *points = NULL;
+    const pmfImageCacheEntry *image;
+    uint32_t version;
+    uint32_t image_type;
+    const char *image_data;
+    const char *blimit;
+    int status = 0;
+
+    UNUSED(etype);
+    UNUSED(rel_abs);
+    UNUSED(img_attr_id);
+    UNUSED(src_unit);
+
+    if (!U_PMR_DRAWIMAGEPOINTS_get(contents, NULL, &img_id, &ctype, &etype,
+                                   &rel_abs, &img_attr_id, &src_unit,
+                                   &src_rect, &elements, &points)) {
+        return 0;
+    }
+    UNUSED(ctype);
+    if (elements < 3) {
+        free(points);
+        return 0;
+    }
+
+    image = pmf_image_cache_get(img_id);
+    if (image == NULL) {
+        free(points);
+        return 0;
+    }
+
+    blimit = image->data + image->size;
+    if (!U_PMF_IMAGE_get(image->data, &version, &image_type, &image_data,
+                         blimit)) {
+        free(points);
+        return 0;
+    }
+    UNUSED(version);
+
+    switch (image_type) {
+    case U_IDT_Bitmap:
+        status = pmf_bitmap_image_draw(image, image_data, blimit, &src_rect,
+                                       points, out, states);
+        break;
+    case U_IDT_Metafile:
+        status = pmf_metafile_image_draw(image_data, blimit, &src_rect, points,
+                                         out, states);
+        break;
+    default:
+        status = 0;
+        break;
+    }
+
+    free(points);
+    return status;
 }
 
 /**
@@ -1730,6 +2125,8 @@ int U_PMR_OBJECT_draw(const char *contents, const char *blimit,
             (void)U_PMF_REGION_draw(ObjCont->accum, out, states);
             break;
         case U_OT_Image:
+            (void)pmf_image_cache_store((uint32_t)ObjCont->Id, ObjCont->accum,
+                                        ObjCont->used);
             (void)U_PMF_IMAGE_draw(ObjCont->accum, out, states);
             break;
         case U_OT_Font:
@@ -1974,7 +2371,11 @@ int U_PMR_MULTIPLYWORLDTRANSFORM_draw(const char *contents, FILE *out,
   */
 int U_PMR_RESETWORLDTRANSFORM_draw(const char *contents, FILE *out,
                                    drawingStates *states) {
-    return (U_PMR_NODATAREC_draw(contents, out, states));
+    UNUSED(contents);
+    UNUSED(out);
+    UNUSED(states);
+    pmf_world_transform_reset();
+    return 1;
 }
 
 /**
@@ -2025,8 +2426,23 @@ int U_PMR_SETPAGETRANSFORM_draw(const char *contents, FILE *out,
   */
 int U_PMR_SETWORLDTRANSFORM_draw(const char *contents, FILE *out,
                                  drawingStates *states) {
-    int status = 1;
-    return (status);
+    U_PMF_TRANSFORMMATRIX matrix;
+    U_XFORM xform;
+
+    if (!U_PMR_SETWORLDTRANSFORM_get(contents, NULL, &matrix)) {
+        return 0;
+    }
+    UNUSED(out);
+    UNUSED(states);
+
+    xform.eM11 = matrix.m11;
+    xform.eM12 = matrix.m12;
+    xform.eM21 = matrix.m21;
+    xform.eM22 = matrix.m22;
+    xform.eDx = matrix.dX;
+    xform.eDy = matrix.dY;
+    pmf_world_transform = xform;
+    return 1;
 }
 
 /**

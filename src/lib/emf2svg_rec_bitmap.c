@@ -101,80 +101,6 @@ static bool image_has_world_transform(drawingStates *states) {
 }
 
 /**
-  \brief Return whether two points match within bitmap clip tolerance.
-  */
-static bool image_point_matches(double x, double y, double expected_x,
-                                double expected_y) {
-    const double tolerance = 1.0;
-
-    return fabs(x - expected_x) <= tolerance && fabs(y - expected_y) <= tolerance;
-}
-
-/**
-  \brief Return which image-box corner a point matches.
-  */
-static unsigned image_box_corner_mask(const imageDestBox *box, POINT_D point) {
-    double left = box->position.x;
-    double top = box->position.y;
-    double right = box->position.x + box->size.x;
-    double bottom = box->position.y + box->size.y;
-
-    if (image_point_matches(point.x, point.y, left, top)) {
-        return 1;
-    }
-    if (image_point_matches(point.x, point.y, right, top)) {
-        return 2;
-    }
-    if (image_point_matches(point.x, point.y, right, bottom)) {
-        return 4;
-    }
-    if (image_point_matches(point.x, point.y, left, bottom)) {
-        return 8;
-    }
-    return 0;
-}
-
-/**
-  \brief Return whether the current clip is exactly the bitmap destination box.
-
-  Some samples, such as nerf-depth-maps.emf, set a clip that is identical to the
-  bitmap rectangle. Keep the existing image-level clip for stable output, but do
-  not wrap these no-op clips in an outer group.
-  */
-static bool image_clip_matches_box(drawingStates *states,
-                                   const imageDestBox *box) {
-    PATH *path = states->currentDeviceContext.clipRGN;
-    POINT_D vertices[5];
-    unsigned corner_mask = 0;
-    size_t index = 0;
-
-    for (; path != NULL; path = path->next) {
-        if (index == 0 && path->section.type != SEG_MOVE) {
-            return false;
-        }
-        if (index > 0 && index < 5 && path->section.type != SEG_LINE) {
-            return false;
-        }
-        if (index == 5) {
-            return path->section.type == SEG_END && path->next == NULL &&
-                   image_point_matches(vertices[0].x, vertices[0].y,
-                                       vertices[4].x, vertices[4].y) &&
-                   corner_mask == 15;
-        }
-        if (index > 5 || path->section.type == SEG_END ||
-            path->section.points == NULL) {
-            return false;
-        }
-
-        vertices[index] = path->section.points[0];
-        corner_mask |= image_box_corner_mask(box, vertices[index]);
-        index++;
-    }
-
-    return false;
-}
-
-/**
   \brief Start an outer clip group for transformed bitmap images.
 
   SVG applies an element's active transform to its clip-path. For transformed
@@ -187,10 +113,6 @@ static imageClipContext image_clip_group_start(FILE *out, drawingStates *states,
     imageClipContext context = {false, false};
 
     if (!states->currentDeviceContext.clipID) {
-        return context;
-    }
-
-    if (image_clip_matches_box(states, box)) {
         return context;
     }
 
@@ -308,6 +230,36 @@ static bool image_box_matches_pending(const imageDestBox *box,
            fabs(box->size.x - mask->size.x) <= tolerance &&
            fabs(box->size.y - mask->size.y) <= tolerance &&
            box->flip_x == mask->flip_x && box->flip_y == mask->flip_y;
+}
+
+/**
+  \brief Consume a recently emitted EMF+ bitmap box matching a GDI fallback.
+
+  PowerPoint writes some images twice in dual-mode EMF files: first as EMF+
+  DrawImagePoints and then as an EMR_STRETCHDIBITS fallback. This only suppresses
+  a fallback when its destination closely matches a bitmap that this converter
+  already emitted from EMF+, fixing duplicated framework-overview.emf depth maps
+  without skipping unrelated GDI fallback content.
+  */
+static bool image_consume_matching_emfplus_box(drawingStates *states,
+                                               const imageDestBox *box) {
+    const double tolerance = 2.0;
+
+    for (size_t i = 0; i < EMFPLUS_RECENT_IMAGE_BOX_COUNT; ++i) {
+        emfPlusImageBox *recent = &states->recentEmfPlusImages[i];
+        if (!recent->active) {
+            continue;
+        }
+        if (fabs(box->position.x - recent->position.x) <= tolerance &&
+            fabs(box->position.y - recent->position.y) <= tolerance &&
+            fabs(box->size.x - recent->size.x) <= tolerance &&
+            fabs(box->size.y - recent->size.y) <= tolerance) {
+            recent->active = false;
+            return true;
+        }
+    }
+
+    return false;
 }
 
 /**
@@ -760,6 +712,14 @@ void U_EMRSTRETCHDIBITS_draw(const char *contents, FILE *out,
         bitmap_rop_mask_flush(out, states);
         bitmap_rop_mask_store(states, contents, BmiSrc, BmpSrc,
                               (size_t)pEmr->cbBitsSrc, &box, pEmr->rclBounds);
+        return;
+    }
+
+    if (states->emfplus && pEmr->dwRop == U_SRCCOPY &&
+        image_consume_matching_emfplus_box(states, &box)) {
+        bitmap_rop_mask_flush(out, states);
+        verbose_printf("   Status:         %sSKIPPED EMF+ BITMAP FALLBACK%s\n",
+                       KYEL, KNRM);
         return;
     }
 
