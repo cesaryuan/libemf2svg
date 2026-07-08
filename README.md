@@ -469,17 +469,17 @@ The emf files used for these checks are located in [./tests/resources/emf/](http
 * Check SVG snapshots against the current baseline:
 
 ```bash
-# Save the current converter output as the baseline.
+# Save the current EMF and WMF converter output as the baseline.
 $ ./tests/resources/snapshot.sh save
 
-# On another branch, regenerate SVGs and compare them with the baseline.
+# On another branch, regenerate EMF and WMF SVGs and compare them with the baseline.
 $ ./tests/resources/snapshot.sh check
 
 # Show the full diff for one changed sample.
 $ ./tests/resources/snapshot.sh check --detail-diff test-000.emf.svg
 
-# Run the same snapshot workflow for WMF inputs via wmf2emf-conv + emf2svg-conv.
-$ ./tests/resources/snapshot.sh save --format wmf
+# Run only one snapshot format when needed.
+$ ./tests/resources/snapshot.sh check --format emf
 $ ./tests/resources/snapshot.sh check --format wmf
 ```
 

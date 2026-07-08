@@ -24,9 +24,13 @@ CALLER_PWD=`pwd -P`
 TEST_ROOT=$($RL -f "$ABSPATH/..")
 ACTION="$1"
 FORMAT="emf"
+RUN_FORMATS="emf wmf"
 EMFDIR=""
+EMFDIR_ARG=""
 SNAPSHOT_DIR=""
+SNAPSHOT_DIR_ARG=""
 WORKDIR=""
+WORKDIR_ARG=""
 INTERMEDIATE_DIR=""
 INPUT_EXT=""
 FORMAT_LABEL=""
@@ -60,6 +64,7 @@ absolute_path(){
 
 # Configure format-specific inputs, outputs, and converter requirements.
 configure_format(){
+    INTERMEDIATE_DIR=""
     case "$FORMAT" in
         emf)
             INPUT_EXT="emf"
@@ -82,16 +87,22 @@ configure_format(){
             ;;
     esac
 
-    if [ -z "$EMFDIR" ]
+    if [ -n "$EMFDIR_ARG" ]
     then
+        EMFDIR="$EMFDIR_ARG"
+    else
         EMFDIR="$DEFAULT_EMFDIR"
     fi
-    if [ -z "$SNAPSHOT_DIR" ]
+    if [ -n "$SNAPSHOT_DIR_ARG" ]
     then
+        SNAPSHOT_DIR="$SNAPSHOT_DIR_ARG"
+    else
         SNAPSHOT_DIR="$DEFAULT_SNAPSHOT_DIR"
     fi
-    if [ -z "$WORKDIR" ]
+    if [ -n "$WORKDIR_ARG" ]
     then
+        WORKDIR="$WORKDIR_ARG"
+    else
         WORKDIR="$DEFAULT_WORKDIR"
     fi
 }
@@ -103,6 +114,7 @@ help(){
 usage: `basename "$0"` save|check [-h] [-e <input dir>] [-d <snapshot dir>] [-o <work dir>] [-r] [-v] [--format emf|wmf] [--detail-diff <sample path>]
 
 Create or compare SVG snapshots for emf2svg-conv and wmf2emf-conv.
+Without --format, save and check run both EMF and WMF snapshots.
 
 actions:
   save   convert input files and overwrite the snapshot baseline
@@ -110,10 +122,10 @@ actions:
 
 arguments:
   -h: display this help
-  -e: alternate input dir (default '$EMFDIR')
-  -d: snapshot dir (default '$SNAPSHOT_DIR')
-  -o: temporary output dir for check (default '$WORKDIR')
-  --format: snapshot format, 'emf' or 'wmf' (default '$FORMAT')
+  -e: alternate input dir (use with --format for one format)
+  -d: snapshot dir (use with --format for one format)
+  -o: temporary output dir for check (use with --format for one format)
+  --format: snapshot format, 'emf' or 'wmf' (default: both)
   -r: resize to 800x600 before snapshotting
   -v: verbose converter output
   --detail-diff: print a unified diff for one changed sample
@@ -284,6 +296,114 @@ compare_snapshots(){
     return $ret
 }
 
+# Validate converter paths needed by the selected formats.
+validate_common_converters(){
+    if ! [ -x "$EMF2SVG_CMD" ]
+    then
+        printf "[%bFAIL%b] missing converter: %s\n" "$BRed" "$RCol" "$EMF2SVG_CMD"
+        printf "Build it first, for example: cmake --build build --target emf2svg-conv\n"
+        return 1
+    fi
+    case " $RUN_FORMATS " in
+        *" wmf "*)
+            ;;
+        *)
+            return 0
+            ;;
+    esac
+
+    if ! [ -x "$WMF2EMF_CMD" ]
+    then
+        printf "[%bFAIL%b] missing converter: %s\n" "$BRed" "$RCol" "$WMF2EMF_CMD"
+        printf "Build it first, for example: cmake --build build --target wmf2emf-conv\n"
+        return 1
+    fi
+}
+
+# Keep one-format directory overrides from being applied to both snapshot trees.
+validate_directory_overrides(){
+    case "$RUN_FORMATS" in
+        *" "*)
+            if [ -n "$EMFDIR_ARG" ] || [ -n "$SNAPSHOT_DIR_ARG" ] || [ -n "$WORKDIR_ARG" ]
+            then
+                printf "[snapshot] -e, -d, and -o require --format emf or --format wmf\n" >&2
+                return 1
+            fi
+            ;;
+    esac
+}
+
+# Run save or check for one concrete format; the default CLI calls this twice.
+run_snapshot_action(){
+    FORMAT="$1"
+    ret=0
+
+    configure_format || return 1
+    EMFDIR="`absolute_path "$EMFDIR"`"
+    SNAPSHOT_DIR="`absolute_path "$SNAPSHOT_DIR"`"
+    WORKDIR="`absolute_path "$WORKDIR"`"
+
+    if ! [ -d "$EMFDIR" ]
+    then
+        printf "[%bFAIL%b] missing %s directory: %s\n" "$BRed" "$RCol" "$FORMAT_LABEL" "$EMFDIR"
+        return 1
+    fi
+    EMFDIR="`cd "$EMFDIR" && pwd -P`"
+
+    log_info "format: $FORMAT"
+
+    if [ "$ACTION" = "save" ]
+    then
+        log_info "saving snapshots to $SNAPSHOT_DIR"
+        generate_snapshots "$EMFDIR" "$SNAPSHOT_DIR"
+        if [ $ret -ne 0 ]
+        then
+            printf "[%bFAIL%b] %s snapshot save failed\n" "$BRed" "$RCol" "$FORMAT_LABEL"
+            return $ret
+        fi
+        printf "[%bSUCCESS%b] %s snapshot saved: %s\n" "$BGre" "$RCol" "$FORMAT_LABEL" "$SNAPSHOT_DIR"
+        return 0
+    fi
+
+    if ! [ -d "$SNAPSHOT_DIR" ]
+    then
+        printf "[%bFAIL%b] missing snapshot baseline: %s\n" "$BRed" "$RCol" "$SNAPSHOT_DIR"
+        printf "Create it first with: ./tests/resources/snapshot.sh save --format %s\n" "$FORMAT"
+        return 1
+    fi
+    SNAPSHOT_DIR="`cd "$SNAPSHOT_DIR" && pwd -P`"
+
+    log_info "checking snapshots against $SNAPSHOT_DIR"
+    generate_snapshots "$EMFDIR" "$WORKDIR"
+    if [ $ret -ne 0 ]
+    then
+        printf "[%bFAIL%b] %s snapshot generation failed\n" "$BRed" "$RCol" "$FORMAT_LABEL"
+        return $ret
+    fi
+    WORKDIR="`cd "$WORKDIR" && pwd -P`"
+
+    CHANGED_LIST="$TEST_ROOT/snapshot-out/$FORMAT-changed-files.txt"
+    mkdir -p "`dirname "$CHANGED_LIST"`"
+    detail_diff="$DETAIL_DIFF"
+    if [ -n "$detail_diff" ]
+    then
+        detail_diff="`snapshot_relpath "$detail_diff"`"
+    fi
+
+    compare_snapshots "$SNAPSHOT_DIR" "$WORKDIR" "$detail_diff"
+    ret=$?
+    if [ $ret -ne 0 ]
+    then
+        printf "[%bFAIL%b] %s snapshot changed\n" "$BRed" "$RCol" "$FORMAT_LABEL"
+        printf "Expected: %s\n" "$SNAPSHOT_DIR"
+        printf "Actual  : %s\n" "$WORKDIR"
+    else
+        printf "[%bSUCCESS%b] %s snapshot matches\n" "$BGre" "$RCol" "$FORMAT_LABEL"
+    fi
+
+    return $ret
+}
+
 while [ $# -gt 0 ]
 do
   opt="$1"
@@ -300,7 +420,7 @@ do
             help
             exit 1
         fi
-        EMFDIR="$1"
+        EMFDIR_ARG="$1"
         ;;
     -d)
         shift
@@ -310,7 +430,7 @@ do
             help
             exit 1
         fi
-        SNAPSHOT_DIR="$1"
+        SNAPSHOT_DIR_ARG="$1"
         ;;
     -o)
         shift
@@ -320,7 +440,7 @@ do
             help
             exit 1
         fi
-        WORKDIR="$1"
+        WORKDIR_ARG="$1"
         ;;
     --format)
         shift
@@ -330,7 +450,7 @@ do
             help
             exit 1
         fi
-        FORMAT="$1"
+        RUN_FORMATS="$1"
         ;;
     -r)
         RESIZE_OPTS="-w 800 -h 600"
@@ -381,80 +501,20 @@ fi
 cd "$ABSPATH" || exit 1
 . ./colors.sh
 
-configure_format || exit 1
-
 EMF2SVG_CMD="`$RL -f ../../build/emf2svg-conv`"
 WMF2EMF_CMD="`$RL -f ../../build/wmf2emf-conv`"
-EMFDIR="`absolute_path "$EMFDIR"`"
-SNAPSHOT_DIR="`absolute_path "$SNAPSHOT_DIR"`"
-WORKDIR="`absolute_path "$WORKDIR"`"
+validate_directory_overrides || exit 1
+validate_common_converters || exit 1
 
-if ! [ -x "$EMF2SVG_CMD" ]
-then
-    printf "[%bFAIL%b] missing converter: %s\n" "$BRed" "$RCol" "$EMF2SVG_CMD"
-    printf "Build it first, for example: cmake --build build --target emf2svg-conv\n"
-    exit 1
-fi
-if [ "$FORMAT" = "wmf" ] && ! [ -x "$WMF2EMF_CMD" ]
-then
-    printf "[%bFAIL%b] missing converter: %s\n" "$BRed" "$RCol" "$WMF2EMF_CMD"
-    printf "Build it first, for example: cmake --build build --target wmf2emf-conv\n"
-    exit 1
-fi
-
-if ! [ -d "$EMFDIR" ]
-then
-    printf "[%bFAIL%b] missing %s directory: %s\n" "$BRed" "$RCol" "$FORMAT_LABEL" "$EMFDIR"
-    exit 1
-fi
-EMFDIR="`cd "$EMFDIR" && pwd -P`"
-
-if [ "$ACTION" = "save" ]
-then
-    log_info "saving snapshots to $SNAPSHOT_DIR"
-    generate_snapshots "$EMFDIR" "$SNAPSHOT_DIR"
-    if [ $ret -ne 0 ]
+final_ret=0
+for fmt in $RUN_FORMATS
+do
+    run_snapshot_action "$fmt"
+    tmpret=$?
+    if [ $tmpret -ne 0 ]
     then
-        printf "[%bFAIL%b] Snapshot save failed\n" "$BRed" "$RCol"
-        exit $ret
+        final_ret=$tmpret
     fi
-    printf "[%bSUCCESS%b] Snapshot saved: %s\n" "$BGre" "$RCol" "$SNAPSHOT_DIR"
-    exit 0
-fi
+done
 
-if ! [ -d "$SNAPSHOT_DIR" ]
-then
-    printf "[%bFAIL%b] missing snapshot baseline: %s\n" "$BRed" "$RCol" "$SNAPSHOT_DIR"
-    printf "Create it first with: ./tests/resources/snapshot.sh save\n"
-    exit 1
-fi
-SNAPSHOT_DIR="`cd "$SNAPSHOT_DIR" && pwd -P`"
-
-log_info "checking snapshots against $SNAPSHOT_DIR"
-generate_snapshots "$EMFDIR" "$WORKDIR"
-if [ $ret -ne 0 ]
-then
-    printf "[%bFAIL%b] Snapshot generation failed\n" "$BRed" "$RCol"
-    exit $ret
-fi
-WORKDIR="`cd "$WORKDIR" && pwd -P`"
-
-CHANGED_LIST="$TEST_ROOT/snapshot-out/$FORMAT-changed-files.txt"
-mkdir -p "`dirname "$CHANGED_LIST"`"
-if [ -n "$DETAIL_DIFF" ]
-then
-    DETAIL_DIFF="`snapshot_relpath "$DETAIL_DIFF"`"
-fi
-
-compare_snapshots "$SNAPSHOT_DIR" "$WORKDIR" "$DETAIL_DIFF"
-ret=$?
-if [ $ret -ne 0 ]
-then
-    printf "[%bFAIL%b] Snapshot changed\n" "$BRed" "$RCol"
-    printf "Expected: %s\n" "$SNAPSHOT_DIR"
-    printf "Actual  : %s\n" "$WORKDIR"
-else
-    printf "[%bSUCCESS%b] Snapshot matches\n" "$BGre" "$RCol"
-fi
-
-exit $ret
+exit $final_ret
