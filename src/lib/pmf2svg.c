@@ -72,6 +72,22 @@ static double pmf_metafile_stroke_scale = 1.0;
 static drawingStates *pmf_parent_bitmap_box_states = NULL;
 
 /**
+  \brief Remember a top-level EMF+ FillPath color for its GDI fallback.
+
+  Dual EMF+/GDI files such as test-188.emf keep alpha only in the EMF+ ARGB
+  FillPath. The later GDI PATINVERT mask fallback carries RGB only, so this
+  short-lived color lets the fallback preserve opacity.
+  */
+static void pmf_recent_fill_color_store(drawingStates *states,
+                                        U_PMF_ARGB color) {
+    states->recentEmfPlusFill.active = true;
+    states->recentEmfPlusFill.red = color.Red;
+    states->recentEmfPlusFill.green = color.Green;
+    states->recentEmfPlusFill.blue = color.Blue;
+    states->recentEmfPlusFill.alpha = color.Alpha;
+}
+
+/**
   \brief Reset the EMF+ world transform used by DrawImagePoints.
   */
 static void pmf_world_transform_reset(void) {
@@ -2533,16 +2549,19 @@ int U_PMR_FILLPATH_draw(const char *contents, FILE *out,
     U_PMF_ARGB color;
     const pmfPathCacheEntry *path;
 
-    if (pmf_metafile_depth <= 0) {
-        return 1;
-    }
     if (!U_PMR_FILLPATH_get(contents, NULL, &path_id, &brush_is_inline,
                             &brush_id)) {
         return 0;
     }
+    if (!pmf_solid_brush_color(brush_id, brush_is_inline, &color)) {
+        return 1;
+    }
+    if (pmf_metafile_depth <= 0) {
+        pmf_recent_fill_color_store(states, color);
+        return 1;
+    }
     path = pmf_path_cache_get(path_id);
-    if (path == NULL || !pmf_solid_brush_color(brush_id, brush_is_inline,
-                                               &color)) {
+    if (path == NULL) {
         return 1;
     }
 

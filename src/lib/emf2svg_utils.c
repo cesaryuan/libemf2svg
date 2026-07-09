@@ -328,6 +328,10 @@ void fill_draw(drawingStates *states, FILE *out, bool *filled, bool *stroked) {
                     states->patinvertBrush.red,
                     states->patinvertBrush.green,
                     states->patinvertBrush.blue);
+            if (states->patinvertBrush.alpha != 0xff) {
+                fprintf(out, "fill-opacity=\"%.4f\" ",
+                        states->patinvertBrush.alpha / 255.0);
+            }
             states->patinvertBrush.consumed = true;
         } else {
             fprintf(out, "fill=\"url(#img-%d-ref)\" ",

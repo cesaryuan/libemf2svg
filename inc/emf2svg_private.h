@@ -281,7 +281,16 @@ typedef struct pendingPatinvertBrush {
     uint8_t red;
     uint8_t green;
     uint8_t blue;
+    uint8_t alpha;
 } pendingPatinvertBrush;
+
+typedef struct emfPlusFillColor {
+    bool active;
+    uint8_t red;
+    uint8_t green;
+    uint8_t blue;
+    uint8_t alpha;
+} emfPlusFillColor;
 
 // structure recording drawing states
 typedef struct {
@@ -367,6 +376,8 @@ typedef struct {
     size_t recentEmfPlusImageNext;
     // Solid brush color from a skipped PATINVERT pair for masked path fills.
     pendingPatinvertBrush patinvertBrush;
+    // Recent EMF+ FillPath ARGB used by matching GDI fallback masks.
+    emfPlusFillColor recentEmfPlusFill;
 } drawingStates;
 
 typedef struct cmap_collection {

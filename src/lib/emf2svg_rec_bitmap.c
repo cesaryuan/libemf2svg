@@ -284,17 +284,30 @@ static void bitblt_patinvert_brush_toggle(drawingStates *states,
     uint8_t red = states->currentDeviceContext.fill_red;
     uint8_t green = states->currentDeviceContext.fill_green;
     uint8_t blue = states->currentDeviceContext.fill_blue;
+    uint8_t alpha = 0xff;
 
     if (states->currentDeviceContext.fill_mode != U_BS_SOLID) {
         states->patinvertBrush.active = false;
         return;
     }
 
+    if (states->recentEmfPlusFill.active) {
+        if (states->recentEmfPlusFill.red == red &&
+            states->recentEmfPlusFill.green == green &&
+            states->recentEmfPlusFill.blue == blue) {
+            alpha = states->recentEmfPlusFill.alpha;
+        }
+        states->recentEmfPlusFill.active = false;
+    }
+
     if (states->patinvertBrush.active && states->patinvertBrush.red == red &&
         states->patinvertBrush.green == green &&
         states->patinvertBrush.blue == blue) {
-        states->patinvertBrush.active = false;
-        return;
+        if (states->patinvertBrush.consumed ||
+            states->patinvertBrush.alpha == alpha) {
+            states->patinvertBrush.active = false;
+            return;
+        }
     }
 
     states->patinvertBrush.active = true;
@@ -304,6 +317,7 @@ static void bitblt_patinvert_brush_toggle(drawingStates *states,
     states->patinvertBrush.red = red;
     states->patinvertBrush.green = green;
     states->patinvertBrush.blue = blue;
+    states->patinvertBrush.alpha = alpha;
 }
 
 /**
@@ -322,13 +336,17 @@ void bitmap_patinvert_brush_flush(FILE *out, drawingStates *states) {
     if (!brush->consumed) {
         fprintf(out,
                 "<%spath style=\"fill:#%02x%02x%02x\" "
-                "d=\"M %.4f,%.4f L %.4f,%.4f L %.4f,%.4f L %.4f,%.4f Z\" />",
+                "d=\"M %.4f,%.4f L %.4f,%.4f L %.4f,%.4f L %.4f,%.4f Z\" ",
                 states->nameSpaceString, brush->red, brush->green, brush->blue,
                 brush->position.x, brush->position.y,
                 brush->position.x + brush->size.x, brush->position.y,
                 brush->position.x + brush->size.x,
                 brush->position.y + brush->size.y, brush->position.x,
                 brush->position.y + brush->size.y);
+        if (brush->alpha != 0xff) {
+            fprintf(out, "fill-opacity=\"%.4f\" ", brush->alpha / 255.0);
+        }
+        fprintf(out, "/>");
     }
     memset(brush, 0, sizeof(*brush));
 }
