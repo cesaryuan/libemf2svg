@@ -30,6 +30,7 @@ extern "C" {
 #include "emf2svg_private.h"
 #include "emf2svg.h"
 #include "pmf2svg.h"
+#include <math.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -132,12 +133,17 @@ static const char *pmf_image_mime_type(const unsigned char *data, size_t size) {
 }
 
 /**
-  \brief Calculate the affine transform described by DrawImagePoints.
+  \brief Calculate the EMF+ destination triangle before point_cal().
+
+  The EMF+ world transform is part of the image placement, but the final EMF
+  map-mode and resize scaling still belong to the target drawing state. Keeping
+  these raw points lets the current state and any parent state project the same
+  bitmap into their own local coordinate systems.
   */
-static void pmf_image_transform_matrix(const U_PMF_RECTF *src,
-                                       const U_PMF_POINTF *points, double *ma,
-                                       double *mb, double *mc, double *md,
-                                       double *me, double *mf) {
+static void pmf_image_transform_points_raw(const U_PMF_RECTF *src,
+                                           const U_PMF_POINTF *points,
+                                           POINT_D *dest0, POINT_D *dest1,
+                                           POINT_D *dest2) {
     double src_w = src->Width == 0.0 ? 1.0 : src->Width;
     double src_h = src->Height == 0.0 ? 1.0 : src->Height;
     double a = (points[1].X - points[0].X) / src_w;
@@ -152,21 +158,72 @@ static void pmf_image_transform_matrix(const U_PMF_RECTF *src,
     double wd = pmf_world_transform.eM22;
     double we = pmf_world_transform.eDx;
     double wf = pmf_world_transform.eDy;
-    *ma = wa * a + wc * b;
-    *mb = wb * a + wd * b;
-    *mc = wa * c + wc * d;
-    *md = wb * c + wd * d;
-    *me = wa * e + wc * f + we;
-    *mf = wb * e + wd * f + wf;
+    double ma = wa * a + wc * b;
+    double mb = wb * a + wd * b;
+    double mc = wa * c + wc * d;
+    double md = wb * c + wd * d;
+    double me = wa * e + wc * f + we;
+    double mf = wb * e + wd * f + wf;
+
+    dest0->x = ma * src->X + mc * src->Y + me;
+    dest0->y = mb * src->X + md * src->Y + mf;
+    dest1->x = ma * (src->X + src->Width) + mc * src->Y + me;
+    dest1->y = mb * (src->X + src->Width) + md * src->Y + mf;
+    dest2->x = ma * src->X + mc * (src->Y + src->Height) + me;
+    dest2->y = mb * src->X + md * (src->Y + src->Height) + mf;
+}
+
+/**
+  \brief Project raw DrawImagePoints corners through one drawing state.
+
+  Resize requests and map modes live in point_cal(), so EMF+ image placement
+  must use the same projection path as GDI records to keep bitmaps aligned.
+  */
+static void pmf_image_project_points(drawingStates *states, POINT_D raw0,
+                                     POINT_D raw1, POINT_D raw2, POINT_D *dest0,
+                                     POINT_D *dest1, POINT_D *dest2) {
+    *dest0 = point_cal(states, raw0.x, raw0.y);
+    *dest1 = point_cal(states, raw1.x, raw1.y);
+    *dest2 = point_cal(states, raw2.x, raw2.y);
+}
+
+/**
+  \brief Calculate the affine transform described by DrawImagePoints.
+  */
+static void pmf_image_transform_matrix(drawingStates *states,
+                                       const U_PMF_RECTF *src,
+                                       const U_PMF_POINTF *points, double *ma,
+                                       double *mb, double *mc, double *md,
+                                       double *me, double *mf) {
+    POINT_D dest0;
+    POINT_D dest1;
+    POINT_D dest2;
+    POINT_D raw0;
+    POINT_D raw1;
+    POINT_D raw2;
+    double src_w = src->Width == 0.0 ? 1.0 : src->Width;
+    double src_h = src->Height == 0.0 ? 1.0 : src->Height;
+
+    pmf_image_transform_points_raw(src, points, &raw0, &raw1, &raw2);
+    pmf_image_project_points(states, raw0, raw1, raw2, &dest0, &dest1, &dest2);
+
+    *ma = (dest1.x - dest0.x) / src_w;
+    *mb = (dest1.y - dest0.y) / src_w;
+    *mc = (dest2.x - dest0.x) / src_h;
+    *md = (dest2.y - dest0.y) / src_h;
+    *me = dest0.x - *ma * src->X - *mc * src->Y;
+    *mf = dest0.y - *mb * src->X - *md * src->Y;
 }
 
 /**
   \brief Write the affine transform described by DrawImagePoints.
   */
 static void pmf_image_transform_draw(FILE *out, const U_PMF_RECTF *src,
-                                     const U_PMF_POINTF *points) {
+                                     const U_PMF_POINTF *points,
+                                     drawingStates *states) {
     double ma, mb, mc, md, me, mf;
-    pmf_image_transform_matrix(src, points, &ma, &mb, &mc, &md, &me, &mf);
+    pmf_image_transform_matrix(states, src, points, &ma, &mb, &mc, &md, &me,
+                               &mf);
 
     fprintf(out, " transform=\"matrix(%.4f %.4f %.4f %.4f %.4f %.4f)\" ",
             ma, mb, mc, md, me, mf);
@@ -190,6 +247,26 @@ static void pmf_image_box_store(drawingStates *states, double min_x,
 }
 
 /**
+  \brief Store one projected DrawImagePoints parallelogram as a recent box.
+  */
+static void pmf_image_box_store_projected(drawingStates *states, POINT_D dest0,
+                                          POINT_D dest1, POINT_D dest2) {
+    POINT_D dest3;
+    double min_x;
+    double min_y;
+    double max_x;
+    double max_y;
+
+    dest3.x = dest1.x + dest2.x - dest0.x;
+    dest3.y = dest1.y + dest2.y - dest0.y;
+    min_x = fmin(fmin(dest0.x, dest1.x), fmin(dest2.x, dest3.x));
+    min_y = fmin(fmin(dest0.y, dest1.y), fmin(dest2.y, dest3.y));
+    max_x = fmax(fmax(dest0.x, dest1.x), fmax(dest2.x, dest3.x));
+    max_y = fmax(fmax(dest0.y, dest1.y), fmax(dest2.y, dest3.y));
+    pmf_image_box_store(states, min_x, min_y, max_x, max_y);
+}
+
+/**
   \brief Remember an emitted EMF+ bitmap box to suppress a matching GDI fallback.
 
   PowerPoint can store the same bitmap once as EMF+ DrawImagePoints and again
@@ -202,38 +279,22 @@ static void pmf_image_box_store(drawingStates *states, double min_x,
 static void pmf_image_box_record(const U_PMF_RECTF *src,
                                  const U_PMF_POINTF *points,
                                  drawingStates *states) {
-    double ma, mb, mc, md, me, mf;
-    double xs[4], ys[4];
-    double min_x, max_x, min_y, max_y;
+    POINT_D raw0;
+    POINT_D raw1;
+    POINT_D raw2;
+    POINT_D dest0;
+    POINT_D dest1;
+    POINT_D dest2;
 
-    pmf_image_transform_matrix(src, points, &ma, &mb, &mc, &md, &me, &mf);
-    xs[0] = ma * src->X + mc * src->Y + me;
-    ys[0] = mb * src->X + md * src->Y + mf;
-    xs[1] = ma * (src->X + src->Width) + mc * src->Y + me;
-    ys[1] = mb * (src->X + src->Width) + md * src->Y + mf;
-    xs[2] = ma * src->X + mc * (src->Y + src->Height) + me;
-    ys[2] = mb * src->X + md * (src->Y + src->Height) + mf;
-    xs[3] = ma * (src->X + src->Width) + mc * (src->Y + src->Height) + me;
-    ys[3] = mb * (src->X + src->Width) + md * (src->Y + src->Height) + mf;
-
-    min_x = max_x = xs[0];
-    min_y = max_y = ys[0];
-    for (size_t i = 1; i < 4; ++i) {
-        if (xs[i] < min_x)
-            min_x = xs[i];
-        if (xs[i] > max_x)
-            max_x = xs[i];
-        if (ys[i] < min_y)
-            min_y = ys[i];
-        if (ys[i] > max_y)
-            max_y = ys[i];
-    }
-
-    pmf_image_box_store(states, min_x, min_y, max_x, max_y);
+    pmf_image_transform_points_raw(src, points, &raw0, &raw1, &raw2);
+    pmf_image_project_points(states, raw0, raw1, raw2, &dest0, &dest1, &dest2);
+    pmf_image_box_store_projected(states, dest0, dest1, dest2);
     if (pmf_parent_bitmap_box_states != NULL &&
         pmf_parent_bitmap_box_states != states) {
-        pmf_image_box_store(pmf_parent_bitmap_box_states, min_x, min_y, max_x,
-                            max_y);
+        pmf_image_project_points(pmf_parent_bitmap_box_states, raw0, raw1, raw2,
+                                 &dest0, &dest1, &dest2);
+        pmf_image_box_store_projected(pmf_parent_bitmap_box_states, dest0,
+                                      dest1, dest2);
     }
 }
 
@@ -281,7 +342,7 @@ static int pmf_bitmap_image_draw(const pmfImageCacheEntry *image,
     fprintf(out, "<%simage x=\"%.4f\" y=\"%.4f\" width=\"%.4f\" "
                  "height=\"%.4f\" ",
             states->nameSpaceString, src->X, src->Y, src->Width, src->Height);
-    pmf_image_transform_draw(out, src, points);
+    pmf_image_transform_draw(out, src, points, states);
     fprintf(out, "xlink:href=\"data:%s;base64,%s\" />\n",
             pmf_image_mime_type((const unsigned char *)bitmap_data, data_size),
             b64);
@@ -357,7 +418,7 @@ static int pmf_metafile_image_draw(const char *data, const char *blimit,
         }
 
         fprintf(out, "<%sg", states->nameSpaceString);
-        pmf_image_transform_draw(out, src, points);
+        pmf_image_transform_draw(out, src, points, states);
         fprintf(out, ">\n%.*s</%sg>\n", (int)svg_len, svg,
                 states->nameSpaceString);
         ok = 1;
