@@ -251,6 +251,7 @@ typedef struct imageLibrary {
 
 typedef struct bitmapRopMask {
     bool active;
+    bool skip_color;
     POINT_D position;
     POINT_D size;
     bool flip_x;

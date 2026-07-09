@@ -301,9 +301,9 @@ static void pmf_image_box_record(const U_PMF_RECTF *src,
 /**
   \brief Draw a cached EMF+ bitmap image object.
 
-  PowerPoint stores some EMF+ fallback images as compressed PNG/JPEG bytes
-  inside Image objects. Drawing those bytes here restores bitmap-only EMF+
-  content such as framework-overview.emf's nested depth maps.
+  Some EMF files store the high-quality image as an EMF+ compressed bitmap and
+  keep a lower-quality GDI fallback for non-EMF+ consumers. Drawing the EMF+
+  bytes preserves antialiased bitmap text in files such as test-blur-font.emf.
   */
 static int pmf_bitmap_image_draw(const pmfImageCacheEntry *image,
                                  const char *data, const char *blimit,
@@ -316,10 +316,6 @@ static int pmf_bitmap_image_draw(const pmfImageCacheEntry *image,
     size_t data_size;
     size_t b64_size;
     char *b64;
-
-    if (pmf_metafile_depth == 0) {
-        return 0;
-    }
 
     if (!U_PMF_BITMAP_get(data, &bitmap, &bitmap_data, blimit)) {
         return 0;

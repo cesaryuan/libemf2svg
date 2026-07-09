@@ -319,6 +319,27 @@ static void bitmap_rop_mask_store(drawingStates *states, const char *contents,
 }
 
 /**
+  \brief Cache a ROP fallback mask that should suppress its matching color pass.
+
+  Some dual EMF/EMF+ files draw an antialiased EMF+ compressed bitmap, then keep
+  a matching 1bpp SRCPAINT/SRCAND GDI fallback. Once the EMF+ bitmap has been
+  emitted, the fallback must be skipped or it paints jagged monochrome text over
+  the high-quality image.
+  */
+static void bitmap_rop_mask_store_skipped_fallback(drawingStates *states,
+                                                   PU_BITMAPINFOHEADER bmi,
+                                                   const imageDestBox *box) {
+    bitmapRopMask *mask = &states->pendingBitmapMask;
+
+    bitmap_rop_mask_clear(states);
+    mask->active = true;
+    mask->skip_color = true;
+    image_box_to_pending(mask, box);
+    mask->width = (uint32_t)bmi->biWidth;
+    mask->height = (uint32_t)abs(bmi->biHeight);
+}
+
+/**
   \brief Flush an unmatched raster-op mask as a normal image.
 
   This keeps non-transparent uses of SRCPAINT visible if they do not form the
@@ -329,6 +350,10 @@ void bitmap_rop_mask_flush(FILE *out, drawingStates *states) {
     imageDestBox box;
 
     if (!mask->active) {
+        return;
+    }
+    if (mask->skip_color) {
+        bitmap_rop_mask_clear(states);
         return;
     }
 
@@ -712,6 +737,12 @@ void U_EMRSTRETCHDIBITS_draw(const char *contents, FILE *out,
 
     if (bitmap_is_rop_mask(BmiSrc, pEmr->dwRop)) {
         bitmap_rop_mask_flush(out, states);
+        if (states->emfplus && image_consume_matching_emfplus_box(states, &box)) {
+            bitmap_rop_mask_store_skipped_fallback(states, BmiSrc, &box);
+            verbose_printf("   Status:         %sSKIPPED EMF+ ROP MASK FALLBACK%s\n",
+                           KYEL, KNRM);
+            return;
+        }
         bitmap_rop_mask_store(states, contents, BmiSrc, BmpSrc,
                               (size_t)pEmr->cbBitsSrc, &box, pEmr->rclBounds);
         return;
@@ -727,6 +758,12 @@ void U_EMRSTRETCHDIBITS_draw(const char *contents, FILE *out,
 
     bool use_pending_mask =
         bitmap_can_apply_rop_mask(states, BmiSrc, pEmr->dwRop, &box);
+    if (use_pending_mask && states->pendingBitmapMask.skip_color) {
+        bitmap_rop_mask_clear(states);
+        verbose_printf("   Status:         %sSKIPPED EMF+ ROP COLOR FALLBACK%s\n",
+                       KYEL, KNRM);
+        return;
+    }
     if (!use_pending_mask) {
         bitmap_rop_mask_flush(out, states);
     }
