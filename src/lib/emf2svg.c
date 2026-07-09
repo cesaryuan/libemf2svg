@@ -72,6 +72,36 @@ static bool patinvert_mask_sequence_allows_record(uint32_t type,
     }
 }
 
+/**
+  \brief Remember the first explicit clip region that can represent page bounds.
+
+  Some EMF+ fallback files draw oversized GDI bitmaps and clip them to the real
+  page. Their EMR_HEADER.rclBounds then includes clipped-away bitmap margins, so
+  the converter needs this early clip candidate when deciding the SVG canvas.
+  */
+static void header_clip_bounds_analyse(const char *contents,
+                                       drawingStates *states) {
+    PU_EMREXTSELECTCLIPRGN pEmr = (PU_EMREXTSELECTCLIPRGN)(contents);
+
+    if (states->headerClipBoundsSet ||
+        pEmr->emr.nSize < U_SIZE_EMREXTSELECTCLIPRGN + U_SIZE_RGNDATAHEADER) {
+        return;
+    }
+
+    if (pEmr->iMode != U_RGN_COPY ||
+        pEmr->cbRgnData < U_SIZE_RGNDATAHEADER) {
+        return;
+    }
+
+    if (pEmr->RgnData->rdh.iType != U_RDH_RECTANGLES ||
+        pEmr->RgnData->rdh.nCount == 0) {
+        return;
+    }
+
+    states->headerClipBounds = pEmr->RgnData->rdh.rclBounds;
+    states->headerClipBoundsSet = true;
+}
+
 int U_emf_onerec_is_emfp(const char *contents, const char *blimit, int recnum,
                          size_t off, bool *ret) {
     PU_ENHMETARECORD lpEMFR = (PU_ENHMETARECORD)(contents + off);
@@ -228,6 +258,9 @@ int U_emf_onerec_analyse(const char *contents, const char *blimit, int recnum,
             }
         }
         break;
+    case U_EMR_EXTSELECTCLIPRGN:
+        header_clip_bounds_analyse(contents, states);
+        break;
     case U_EMR_SETWINDOWORGEX:
     case U_EMR_SETVIEWPORTEXTEX:
     case U_EMR_SETVIEWPORTORGEX:
@@ -277,7 +310,6 @@ int U_emf_onerec_analyse(const char *contents, const char *blimit, int recnum,
     case U_EMR_FRAMERGN:
     case U_EMR_INVERTRGN:
     case U_EMR_PAINTRGN:
-    case U_EMR_EXTSELECTCLIPRGN:
     case U_EMR_BITBLT:
     case U_EMR_STRETCHBLT:
     case U_EMR_MASKBLT:

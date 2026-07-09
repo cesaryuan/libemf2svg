@@ -7,9 +7,79 @@ extern "C" {
 #endif
 #include "emf2svg_private.h"
 #include "emf2svg_print.h"
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+/**
+  \brief Return the absolute width of an EMF rectangle.
+  */
+static double rect_width(U_RECTL rect) {
+    return fabs((double)rect.right - (double)rect.left);
+}
+
+/**
+  \brief Return the absolute height of an EMF rectangle.
+  */
+static double rect_height(U_RECTL rect) {
+    return fabs((double)rect.bottom - (double)rect.top);
+}
+
+/**
+  \brief Return whether two page dimensions are close enough to be equivalent.
+  */
+static bool page_dimension_close(double a, double b) {
+    double tolerance = fmax(2.0, fmax(a, b) * 0.01);
+    return fabs(a - b) <= tolerance;
+}
+
+/**
+  \brief Return whether the header bounds are visibly larger than a page clip.
+
+  uav-sample-images.emf declares horizontally oversized header bounds from a
+  GDI bitmap fallback, but the bitmap is clipped to the real EMF+ page. When
+  the first clip matches rclFrame's physical page size and only the horizontal
+  bounds are inflated, prefer that clip for the SVG canvas so clipped-away
+  bitmap margins do not become visible whitespace.
+  */
+static bool header_should_use_clip_bounds(PU_EMRHEADER pEmr,
+                                          U_RECTL clipBounds) {
+    if (pEmr->szlMillimeters.cx == 0 || pEmr->szlMillimeters.cy == 0 ||
+        pEmr->szlDevice.cx == 0 || pEmr->szlDevice.cy == 0) {
+        return false;
+    }
+
+    double clipWidth = rect_width(clipBounds);
+    double clipHeight = rect_height(clipBounds);
+    if (clipWidth <= 0.0 || clipHeight <= 0.0) {
+        return false;
+    }
+
+    double pxPerMmX =
+        (double)pEmr->szlDevice.cx / (double)pEmr->szlMillimeters.cx;
+    double pxPerMmY =
+        (double)pEmr->szlDevice.cy / (double)pEmr->szlMillimeters.cy;
+    double frameWidth =
+        rect_width(pEmr->rclFrame) * 0.01 * pxPerMmX;
+    double frameHeight =
+        rect_height(pEmr->rclFrame) * 0.01 * pxPerMmY;
+    if (!page_dimension_close(frameWidth, clipWidth) ||
+        !page_dimension_close(frameHeight, clipHeight)) {
+        return false;
+    }
+
+    double headerWidth = rect_width(pEmr->rclBounds);
+    double headerHeight = rect_height(pEmr->rclBounds);
+    double tolerance = fmax(4.0, fmax(clipWidth, clipHeight) * 0.01);
+    bool horizontalOversized =
+        headerWidth > clipWidth + tolerance ||
+        (double)pEmr->rclBounds.left < (double)clipBounds.left - tolerance ||
+        (double)pEmr->rclBounds.right > (double)clipBounds.right + tolerance;
+
+    return horizontalOversized &&
+           page_dimension_close(headerHeight, clipHeight);
+}
 
 void U_EMREOF_draw(const char *contents, FILE *out, drawingStates *states) {
     FLAG_PARTIAL;
@@ -57,8 +127,18 @@ void U_EMRHEADER_draw(const char *contents, FILE *out, drawingStates *states) {
     states->objectTable = calloc(pEmr->nHandles + 1, sizeof(emfGraphObject));
     states->objectTableSize = pEmr->nHandles;
 
-    double ratioXY = (double)(pEmr->rclBounds.right - pEmr->rclBounds.left) /
-                     (double)(pEmr->rclBounds.bottom - pEmr->rclBounds.top);
+    U_RECTL outputBounds = pEmr->rclBounds;
+    if (states->headerClipBoundsSet &&
+        header_should_use_clip_bounds(pEmr, states->headerClipBounds)) {
+        outputBounds = states->headerClipBounds;
+        verbose_printf("   Canvas bounds: using frame-sized clip {%d,%d,%d,%d} "
+                       "instead of oversized header bounds\n",
+                       outputBounds.left, outputBounds.top, outputBounds.right,
+                       outputBounds.bottom);
+    }
+
+    double ratioXY = (double)(outputBounds.right - outputBounds.left) /
+                     (double)(outputBounds.bottom - outputBounds.top);
 
     /**
     In EMF coordinates are specified using an origin (`[0,0]` point) located at
@@ -95,7 +175,7 @@ void U_EMRHEADER_draw(const char *contents, FILE *out, drawingStates *states) {
     While this may be a weak assumption, nothing better came to mind.
     **/
 
-    if (pEmr->rclBounds.top*pEmr->rclBounds.bottom < 0) {
+    if (outputBounds.top*outputBounds.bottom < 0) {
         states->fixBrokenYTransform = true;
     }
 
@@ -113,20 +193,20 @@ void U_EMRHEADER_draw(const char *contents, FILE *out, drawingStates *states) {
         states->imgHeight = states->imgWidth / ratioXY;
     } else {
         states->imgWidth =
-            (double)abs(pEmr->rclBounds.right - pEmr->rclBounds.left);
+            (double)abs(outputBounds.right - outputBounds.left);
         states->imgHeight =
-            (double)abs(pEmr->rclBounds.bottom - pEmr->rclBounds.top);
+            (double)abs(outputBounds.bottom - outputBounds.top);
     }
 
     // set scaling for original resolution
     // states->scaling = 1;
     states->scaling = states->imgWidth /
-                      (double)abs(pEmr->rclBounds.right - pEmr->rclBounds.left);
+                      (double)abs(outputBounds.right - outputBounds.left);
 
 
     // remember reference point of the output DC
-    states->RefX = (double)pEmr->rclBounds.left;
-    states->RefY = (double)pEmr->rclBounds.top;
+    states->RefX = (double)outputBounds.left;
+    states->RefY = (double)outputBounds.top;
 
     states->pxPerMm =
         (double)pEmr->szlDevice.cx / (double)pEmr->szlMillimeters.cx;

@@ -350,6 +350,9 @@ typedef struct {
     bool windowExSet;
     // true if we are fixing layout problems from Wine-generated EMF
     bool fixBrokenYTransform;
+    // First page-sized clip candidate used to correct oversized header bounds.
+    bool headerClipBoundsSet;
+    U_RECTL headerClipBounds;
     double pxPerMm;
     uint16_t MapMode;
     // Text orientation
