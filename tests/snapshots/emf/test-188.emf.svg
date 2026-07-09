@@ -1,12 +1,12 @@
 <?xml version="1.0"  encoding="UTF-8" standalone="no"?>
 <svg version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="71.0000" height="49.0000">
 <g transform="translate(0.0000, 0.00 00)">
-<path style="fill:#a4d1f2" d="M 2.0000,1.0000 L 70.0000,1.0000 L 70.0000,25.0000 L 2.0000,25.0000 Z" /><g transform="matrix(0.0625 0.0000 0.0000 0.0625 0.0000 0.0000)">
+<g transform="matrix(0.0625 0.0000 0.0000 0.0625 0.0000 0.0000)">
 <defs><image id="img-1" x="0" y="0" width="8" height="8" xlink:href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAJUlEQVQYlWNgYGD4//////+4aEYoBydgYmRkZGBgYGDASQ8FEwBNDSQLBjwa0AAAAABJRU5ErkJgggAA"  preserveAspectRatio="none" /><pattern id="img-1-ref" x="0" y="0" width="8" height="8" patternUnits="userSpaceOnUse" >
 <use id="img-1-ign" xlink:href="#img-1" /></pattern></defs>
-<path d="M 34.0000,386.0000 C 152.0000,373.0000 270.0000,360.0000 359.0000,301.0000 C 448.0000,243.0000 502.0000,30.0000 568.0000,35.0000 C 634.0000,39.0000 665.0000,272.0000 752.0000,329.0000 C 840.0000,386.0000 1058.0000,349.0000 1093.0000,377.0000 L 34.0000,386.0000 Z " fill="#img-1-ref" stroke="none" />
+<path d="M 34.0000,386.0000 C 152.0000,373.0000 270.0000,360.0000 359.0000,301.0000 C 448.0000,243.0000 502.0000,30.0000 568.0000,35.0000 C 634.0000,39.0000 665.0000,272.0000 752.0000,329.0000 C 840.0000,386.0000 1058.0000,349.0000 1093.0000,377.0000 L 34.0000,386.0000 Z " fill="#A4D1F2" fill-opacity="0.7490" stroke="none" />
 </g>
 <g transform="matrix(1.0000 0.0000 0.0000 1.0000 0.0000 0.0000)">
-<path style="fill:#a4d1f2" d="M 2.0000,1.0000 L 70.0000,1.0000 L 70.0000,25.0000 L 2.0000,25.0000 Z" /></g>
+</g>
 </g>
 </svg>
