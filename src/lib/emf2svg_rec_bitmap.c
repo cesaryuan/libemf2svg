@@ -239,11 +239,13 @@ static bool image_box_matches_pending(const imageDestBox *box,
   DrawImagePoints and then as an EMR_STRETCHDIBITS fallback. This only suppresses
   a fallback when its destination closely matches a bitmap that this converter
   already emitted from EMF+, fixing duplicated framework-overview.emf depth maps
-  without skipping unrelated GDI fallback content.
+  without skipping unrelated GDI fallback content. Some fallbacks are inset by 
+  one pixel on each side and differ by a small float rounding tail, so the 
+  tolerance must be slightly above two pixels.
   */
 static bool image_consume_matching_emfplus_box(drawingStates *states,
                                                const imageDestBox *box) {
-    const double tolerance = 2.0;
+    const double tolerance = 2.25;
 
     for (size_t i = 0; i < EMFPLUS_RECENT_IMAGE_BOX_COUNT; ++i) {
         emfPlusImageBox *recent = &states->recentEmfPlusImages[i];
