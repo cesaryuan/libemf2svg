@@ -41,15 +41,34 @@ extern "C" {
 #define UNUSED(x)                                                              \
     (void)(x) //! Please ignore - Doxygen simply insisted on including this
 
+int U_PMF_VARPOINTS_get(const char *contents, uint16_t Flags, int Elements,
+                        U_PMF_POINTF **Points, const char *blimit);
+
 typedef struct {
     bool active;
     char *data;
     size_t size;
 } pmfImageCacheEntry;
 
+typedef struct {
+    bool active;
+    U_PMF_POINTF *points;
+    uint8_t *types;
+    uint32_t count;
+} pmfPathCacheEntry;
+
+typedef struct {
+    bool active;
+    U_PMF_ARGB color;
+    U_FLOAT width;
+} pmfPenCacheEntry;
+
 static pmfImageCacheEntry pmf_image_cache[64];
+static pmfPathCacheEntry pmf_path_cache[64];
+static pmfPenCacheEntry pmf_pen_cache[64];
 static U_XFORM pmf_world_transform = {1.0, 0.0, 0.0, 1.0, 0.0, 0.0};
 static int pmf_metafile_depth = 0;
+static double pmf_metafile_stroke_scale = 1.0;
 static drawingStates *pmf_parent_bitmap_box_states = NULL;
 
 /**
@@ -79,6 +98,50 @@ static void pmf_image_cache_clear(void) {
         pmf_image_cache[i].size = 0;
         pmf_image_cache[i].active = false;
     }
+}
+
+/**
+  \brief Clear cached EMF+ path objects.
+
+  EMF+ path-only metafiles such as test-formula2.emf define outlines as Path
+  objects followed by FillPath records. Reset the object cache at EMF+ stream
+  boundaries so object IDs do not leak across nested metafiles.
+  */
+static void pmf_path_cache_clear(void) {
+    for (size_t i = 0; i < sizeof(pmf_path_cache) / sizeof(pmf_path_cache[0]);
+         i++) {
+        free(pmf_path_cache[i].points);
+        free(pmf_path_cache[i].types);
+        pmf_path_cache[i].points = NULL;
+        pmf_path_cache[i].types = NULL;
+        pmf_path_cache[i].count = 0;
+        pmf_path_cache[i].active = false;
+    }
+}
+
+/**
+  \brief Clear cached EMF+ pen objects.
+
+  test-formula2.emf draws operators such as equals signs, minus signs, and
+  wavy relation marks with DrawPath plus Pen records rather than FillPath.
+  Keep pen state scoped to one EMF+ stream.
+  */
+static void pmf_pen_cache_clear(void) {
+    for (size_t i = 0; i < sizeof(pmf_pen_cache) / sizeof(pmf_pen_cache[0]);
+         i++) {
+        pmf_pen_cache[i].active = false;
+        pmf_pen_cache[i].width = 0.0;
+        memset(&pmf_pen_cache[i].color, 0, sizeof(pmf_pen_cache[i].color));
+    }
+}
+
+/**
+  \brief Reset EMF+ object caches at a stream boundary.
+  */
+static void pmf_object_caches_clear(void) {
+    pmf_image_cache_clear();
+    pmf_path_cache_clear();
+    pmf_pen_cache_clear();
 }
 
 /**
@@ -112,6 +175,301 @@ static const pmfImageCacheEntry *pmf_image_cache_get(uint32_t id) {
         return NULL;
     }
     return &pmf_image_cache[id];
+}
+
+/**
+  \brief Decode EMF+ path point types into one byte per point.
+  */
+static uint8_t *pmf_path_types_decode(const char *types, uint16_t flags,
+                                      uint32_t count, const char *blimit) {
+    uint8_t *decoded;
+    uint32_t out_i = 0;
+
+    if (types == NULL || count == 0) {
+        return NULL;
+    }
+    decoded = (uint8_t *)calloc(count, sizeof(uint8_t));
+    if (decoded == NULL) {
+        return NULL;
+    }
+
+    if (flags & U_PPF_R) {
+        while (out_i < count) {
+            int bezier;
+            int run_length;
+            int point_type;
+            if (!U_PMF_PATHPOINTTYPERLE_get(types, &bezier, &run_length,
+                                            &point_type, blimit)) {
+                free(decoded);
+                return NULL;
+            }
+            types += sizeof(U_PMF_PATHPOINTTYPERLE);
+            for (int i = 0; i < run_length && out_i < count; i++) {
+                decoded[out_i++] =
+                    (uint8_t)((bezier ? U_PPT_Bezier : point_type) &
+                              (U_PPT_MASK | U_PTP_MASK));
+            }
+        }
+    } else {
+        for (out_i = 0; out_i < count; out_i++) {
+            int type_flags;
+            int point_type;
+            if (!U_PMF_PATHPOINTTYPE_get(types + out_i, &type_flags,
+                                         &point_type, blimit)) {
+                free(decoded);
+                return NULL;
+            }
+            decoded[out_i] =
+                (uint8_t)((type_flags << U_PTP_SHIFT) | point_type);
+        }
+    }
+
+    return decoded;
+}
+
+/**
+  \brief Store a completed EMF+ Path object for later FillPath/DrawPath records.
+
+  test-formula2.emf stores formula glyph outlines as EMF+ paths without a GDI
+  fallback. Caching Path objects lets the later FillPath records emit SVG path
+  geometry instead of leaving the conversion blank.
+  */
+static int pmf_path_cache_store(uint32_t id, const char *data,
+                                const char *blimit) {
+    uint32_t version;
+    uint32_t count;
+    uint16_t flags;
+    const char *points_raw;
+    const char *types_raw;
+    U_PMF_POINTF *points = NULL;
+    uint8_t *types = NULL;
+    pmfPathCacheEntry *entry;
+
+    if (id >= sizeof(pmf_path_cache) / sizeof(pmf_path_cache[0]) ||
+        data == NULL) {
+        return 0;
+    }
+    if (!U_PMF_PATH_get(data, &version, &count, &flags, &points_raw,
+                        &types_raw, blimit)) {
+        return 0;
+    }
+    UNUSED(version);
+    if (!U_PMF_VARPOINTS_get(points_raw, flags, (int)count, &points, blimit)) {
+        return 0;
+    }
+    types = pmf_path_types_decode(types_raw, flags, count, blimit);
+    if (types == NULL) {
+        free(points);
+        return 0;
+    }
+
+    entry = &pmf_path_cache[id];
+    free(entry->points);
+    free(entry->types);
+    entry->points = points;
+    entry->types = types;
+    entry->count = count;
+    entry->active = true;
+    return 1;
+}
+
+/**
+  \brief Return a cached EMF+ Path object by object ID.
+  */
+static const pmfPathCacheEntry *pmf_path_cache_get(uint32_t id) {
+    if (id >= sizeof(pmf_path_cache) / sizeof(pmf_path_cache[0]) ||
+        !pmf_path_cache[id].active) {
+        return NULL;
+    }
+    return &pmf_path_cache[id];
+}
+
+/**
+  \brief Return the solid color carried by an EMF+ Brush object.
+  */
+static int pmf_solid_brush_object_color(const char *brush, const char *blimit,
+                                        U_PMF_ARGB *color) {
+    uint32_t version;
+    uint32_t type;
+    const char *data;
+
+    if (brush == NULL || color == NULL) {
+        return 0;
+    }
+    if (!U_PMF_BRUSH_get(brush, &version, &type, &data, blimit)) {
+        return 0;
+    }
+    UNUSED(version);
+    if (type != U_BT_SolidColor) {
+        return 0;
+    }
+    return U_PMF_ARGB_get(data, &color->Blue, &color->Green, &color->Red,
+                          &color->Alpha, blimit);
+}
+
+/**
+  \brief Store a completed EMF+ Pen object for later DrawPath records.
+
+  The formula samples use solid pens for stroke-only operators. Caching the pen
+  width and color lets DrawPath render those symbols without enabling broader
+  unsupported pen features.
+  */
+static int pmf_pen_cache_store(uint32_t id, const char *data,
+                               const char *blimit) {
+    uint32_t version;
+    uint32_t type;
+    const char *pen_data;
+    const char *brush;
+    uint32_t flags;
+    uint32_t unit;
+    U_FLOAT width;
+    const char *optional_data;
+    U_PMF_ARGB color;
+    pmfPenCacheEntry *entry;
+
+    if (id >= sizeof(pmf_pen_cache) / sizeof(pmf_pen_cache[0]) ||
+        data == NULL) {
+        return 0;
+    }
+    if (!U_PMF_PEN_get(data, &version, &type, &pen_data, &brush, blimit)) {
+        return 0;
+    }
+    UNUSED(version);
+    if (type != 0 ||
+        !U_PMF_PENDATA_get(pen_data, &flags, &unit, &width, &optional_data,
+                           blimit) ||
+        !pmf_solid_brush_object_color(brush, blimit, &color)) {
+        return 0;
+    }
+    UNUSED(flags);
+    UNUSED(unit);
+    UNUSED(optional_data);
+
+    entry = &pmf_pen_cache[id];
+    entry->color = color;
+    entry->width = width;
+    entry->active = true;
+    return 1;
+}
+
+/**
+  \brief Return a cached EMF+ Pen object by object ID.
+  */
+static const pmfPenCacheEntry *pmf_pen_cache_get(uint32_t id) {
+    if (id >= sizeof(pmf_pen_cache) / sizeof(pmf_pen_cache[0]) ||
+        !pmf_pen_cache[id].active) {
+        return NULL;
+    }
+    return &pmf_pen_cache[id];
+}
+
+/**
+  \brief Project one EMF+ path point through the EMF+ transform and EMF state.
+  */
+static POINT_D pmf_path_point_project(drawingStates *states,
+                                      const U_PMF_POINTF *point) {
+    double x = pmf_world_transform.eM11 * point->X +
+               pmf_world_transform.eM21 * point->Y +
+               pmf_world_transform.eDx;
+    double y = pmf_world_transform.eM12 * point->X +
+               pmf_world_transform.eM22 * point->Y +
+               pmf_world_transform.eDy;
+    return point_cal(states, x, y);
+}
+
+/**
+  \brief Return the projected scale for EMF+ pen widths.
+
+  Formula samples can store operators as EMF+ paths under a world transform.
+  Path coordinates already go through that transform, so DrawPath pen widths
+  must use the same projected scale instead of the raw pen width.
+  */
+static double pmf_path_stroke_scale(drawingStates *states) {
+    U_PMF_POINTF origin = {0.0, 0.0};
+    U_PMF_POINTF unit_x = {1.0, 0.0};
+    U_PMF_POINTF unit_y = {0.0, 1.0};
+    POINT_D p0 = pmf_path_point_project(states, &origin);
+    POINT_D px = pmf_path_point_project(states, &unit_x);
+    POINT_D py = pmf_path_point_project(states, &unit_y);
+    double sx = hypot(px.x - p0.x, px.y - p0.y);
+    double sy = hypot(py.x - p0.x, py.y - p0.y);
+
+    if (sx <= 0.0) {
+        return sy > 0.0 ? sy : 1.0;
+    }
+    if (sy <= 0.0) {
+        return sx;
+    }
+    return fmin(sx, sy);
+}
+
+/**
+  \brief Resolve the inline solid brush color supported for FillPath.
+  */
+static int pmf_solid_brush_color(uint32_t brush_id, int inline_argb,
+                                 U_PMF_ARGB *color) {
+    if (color == NULL) {
+        return 0;
+    }
+    if (inline_argb) {
+        memcpy(color, &brush_id, sizeof(*color));
+        return 1;
+    }
+    return 0;
+}
+
+/**
+  \brief Emit a cached EMF+ Path as SVG path data.
+
+  This intentionally implements the subset needed by path-only formula
+  metafiles: Start, Line, Bezier, and CloseSubpath point types.
+  */
+static int pmf_path_data_draw(const pmfPathCacheEntry *path, FILE *out,
+                              drawingStates *states) {
+    uint32_t i = 0;
+
+    if (path == NULL || !path->active || path->count == 0) {
+        return 0;
+    }
+    while (i < path->count) {
+        uint8_t point_type = path->types[i] & U_PPT_MASK;
+        bool close_subpath = (path->types[i] & U_PTP_CloseSubpath) != 0;
+        POINT_D point = pmf_path_point_project(states, &path->points[i]);
+
+        switch (point_type) {
+        case U_PPT_Start:
+            fprintf(out, "M %.4f,%.4f ", point.x, point.y);
+            i++;
+            break;
+        case U_PPT_Line:
+            fprintf(out, "L %.4f,%.4f ", point.x, point.y);
+            if (close_subpath) {
+                fprintf(out, "Z ");
+            }
+            i++;
+            break;
+        case U_PPT_Bezier:
+            if (i + 2 >= path->count) {
+                return 0;
+            }
+            POINT_D control1 = point;
+            POINT_D control2 = pmf_path_point_project(states,
+                                                      &path->points[i + 1]);
+            POINT_D end =
+                pmf_path_point_project(states, &path->points[i + 2]);
+            fprintf(out, "C %.4f,%.4f %.4f,%.4f %.4f,%.4f ", control1.x,
+                    control1.y, control2.x, control2.y, end.x, end.y);
+            if (path->types[i + 2] & U_PTP_CloseSubpath) {
+                fprintf(out, "Z ");
+            }
+            i += 3;
+            break;
+        default:
+            i++;
+            break;
+        }
+    }
+    return 1;
 }
 
 /**
@@ -227,6 +585,36 @@ static void pmf_image_transform_draw(FILE *out, const U_PMF_RECTF *src,
 
     fprintf(out, " transform=\"matrix(%.4f %.4f %.4f %.4f %.4f %.4f)\" ",
             ma, mb, mc, md, me, mf);
+}
+
+/**
+  \brief Return a conservative stroke scale for a DrawImagePoints matrix.
+
+  Nested EMF+ metafiles can be placed with non-uniform scaling. Using the
+  smaller axis for open multi-segment strokes avoids visually fattening wavy
+  relation symbols while keeping simple horizontal operators on their original
+  SVG path.
+  */
+static double pmf_image_stroke_scale(drawingStates *states,
+                                     const U_PMF_RECTF *src,
+                                     const U_PMF_POINTF *points) {
+    double ma, mb, mc, md, me, mf;
+    double sx;
+    double sy;
+
+    pmf_image_transform_matrix(states, src, points, &ma, &mb, &mc, &md, &me,
+                               &mf);
+    UNUSED(me);
+    UNUSED(mf);
+    sx = hypot(ma, mb);
+    sy = hypot(mc, md);
+    if (sx <= 0.0) {
+        return sy > 0.0 ? sy : 1.0;
+    }
+    if (sy <= 0.0) {
+        return sx;
+    }
+    return fmin(sx, sy);
 }
 
 /**
@@ -362,6 +750,7 @@ static int pmf_metafile_image_draw(const char *data, const char *blimit,
     size_t svg_len = 0;
     generatorOptions options;
     U_XFORM saved_world_transform = pmf_world_transform;
+    double saved_metafile_stroke_scale = pmf_metafile_stroke_scale;
     drawingStates *saved_parent_bitmap_box_states =
         pmf_parent_bitmap_box_states;
     int ok = 0;
@@ -384,11 +773,37 @@ static int pmf_metafile_image_draw(const char *data, const char *blimit,
         return 0;
     }
 
-    metafile_copy = (char *)malloc(size);
+    uint32_t first_record_type = 0;
+    if (size >= sizeof(first_record_type)) {
+        memcpy(&first_record_type, metafile_data, sizeof(first_record_type));
+    }
+    if ((type == U_MDT_EmfPlusOnly || type == U_MDT_EmfPlusDual) &&
+        size >= sizeof(uint32_t) && first_record_type != U_EMR_HEADER) {
+        /*
+         * EmfPlusOnly image payloads can start at the EMR_HEADER nSize field,
+         * omitting the leading iType. test-formula2.emf uses this form; add
+         * the missing record type so the recursive EMF parser can enter the
+         * nested stream.
+         */
+        metafile_copy = (char *)malloc(size + sizeof(uint32_t));
+        if (metafile_copy == NULL) {
+            return 0;
+        }
+        uint32_t header_type = U_EMR_HEADER;
+        memcpy(metafile_copy, &header_type, sizeof(header_type));
+        memcpy(metafile_copy + sizeof(header_type), metafile_data, size);
+        size += sizeof(header_type);
+    } else {
+        metafile_copy = (char *)malloc(size);
+        if (metafile_copy == NULL) {
+            return 0;
+        }
+        memcpy(metafile_copy, metafile_data, size);
+    }
+
     if (metafile_copy == NULL) {
         return 0;
     }
-    memcpy(metafile_copy, metafile_data, size);
 
     memset(&options, 0, sizeof(options));
     options.verbose = false;
@@ -396,10 +811,14 @@ static int pmf_metafile_image_draw(const char *data, const char *blimit,
     options.svgDelimiter = false;
 
     pmf_parent_bitmap_box_states = states;
+    pmf_metafile_stroke_scale =
+        saved_metafile_stroke_scale *
+        pmf_image_stroke_scale(states, src, points);
     pmf_metafile_depth++;
     int convert_ok = emf2svg(metafile_copy, size, &svg, &svg_len, &options);
     pmf_metafile_depth--;
     pmf_parent_bitmap_box_states = saved_parent_bitmap_box_states;
+    pmf_metafile_stroke_scale = saved_metafile_stroke_scale;
     pmf_world_transform = saved_world_transform;
 
     if (convert_ok != 0 && svg != NULL) {
@@ -510,13 +929,13 @@ int U_pmf_onerec_draw(const char *contents, const char *blimit, int recnum,
 
     switch (type) {
     case (U_PMR_HEADER):
-        pmf_image_cache_clear();
+        pmf_object_caches_clear();
         U_PMR_HEADER_draw(contents, out, states);
         break;
     case (U_PMR_ENDOFFILE):
         U_PMR_ENDOFFILE_draw(contents, out, states);
         U_OA_release(&ObjCont);
-        pmf_image_cache_clear();
+        pmf_object_caches_clear();
         break;
     case (U_PMR_COMMENT):
         U_PMR_COMMENT_draw(contents, out, states);
@@ -1965,8 +2384,78 @@ int U_PMR_DRAWLINES_draw(const char *contents, FILE *out,
   */
 int U_PMR_DRAWPATH_draw(const char *contents, FILE *out,
                         drawingStates *states) {
-    int status = 1;
-    return (status);
+    uint32_t path_id;
+    uint32_t pen_id;
+    const pmfPathCacheEntry *path;
+    const pmfPenCacheEntry *pen;
+    double stroke_width;
+    double raw_width;
+    bool stabilize_stroke;
+    bool rounded_stroke;
+
+    if (pmf_metafile_depth <= 0) {
+        return 1;
+    }
+    if (!U_PMR_DRAWPATH_get(contents, NULL, &path_id, &pen_id)) {
+        return 0;
+    }
+    path = pmf_path_cache_get(path_id);
+    pen = pmf_pen_cache_get(pen_id);
+    if (path == NULL || pen == NULL) {
+        return 1;
+    }
+    if (pen->color.Alpha == 0) {
+        return 1;
+    }
+
+    raw_width = fabs((double)pen->width);
+    stroke_width = raw_width * pmf_path_stroke_scale(states);
+    stabilize_stroke = false;
+    rounded_stroke = false;
+    /*
+     * Formula metafiles such as test-formula3.emf can put the page-scale
+     * placement in the parent DrawImagePoints while also using a smaller child
+     * world transform for coordinates. Applying both to pen width makes
+     * operators subpixel-thin; emit a device-width stroke from the parent scale.
+     */
+    if (pmf_metafile_stroke_scale > 0.0 && pmf_metafile_stroke_scale < 0.5) {
+        double parent_width = raw_width * pmf_metafile_stroke_scale;
+        stroke_width *= pmf_metafile_stroke_scale;
+        if (parent_width > stroke_width) {
+            stroke_width = parent_width;
+        }
+        stabilize_stroke = true;
+        rounded_stroke = path->count > 2;
+    } else if (path->count > 2 && pmf_metafile_stroke_scale > 0.0 &&
+               fabs(pmf_metafile_stroke_scale - 1.0) > 0.0001) {
+        /*
+         * Multi-point open strokes such as the MathType wavy relation mark look
+         * too heavy when the parent transform is near identity but still
+         * non-uniform. Keep their visible width stable without affecting simple
+         * horizontal operators.
+         */
+        stroke_width *= pmf_metafile_stroke_scale;
+        stabilize_stroke = true;
+        rounded_stroke = true;
+    }
+    fprintf(out, "<%spath d=\"", states->nameSpaceString);
+    if (!pmf_path_data_draw(path, out, states)) {
+        fprintf(out, "\" />\n");
+        return 0;
+    }
+    fprintf(out,
+            "\" fill=\"none\" stroke=\"#%02X%02X%02X\" "
+            "stroke-opacity=\"%.4f\" stroke-width=\"%.4f\"",
+            pen->color.Red, pen->color.Green, pen->color.Blue,
+            pen->color.Alpha / 255.0, stroke_width);
+    if (stabilize_stroke) {
+        fprintf(out, " vector-effect=\"non-scaling-stroke\"");
+        if (rounded_stroke) {
+            fprintf(out, " stroke-linecap=\"round\" stroke-linejoin=\"round\"");
+        }
+    }
+    fprintf(out, " />\n");
+    return 1;
 }
 
 /**
@@ -2038,8 +2527,34 @@ int U_PMR_FILLELLIPSE_draw(const char *contents, FILE *out,
   */
 int U_PMR_FILLPATH_draw(const char *contents, FILE *out,
                         drawingStates *states) {
-    int status = 1;
-    return (status);
+    uint32_t path_id;
+    int brush_is_inline;
+    uint32_t brush_id;
+    U_PMF_ARGB color;
+    const pmfPathCacheEntry *path;
+
+    if (pmf_metafile_depth <= 0) {
+        return 1;
+    }
+    if (!U_PMR_FILLPATH_get(contents, NULL, &path_id, &brush_is_inline,
+                            &brush_id)) {
+        return 0;
+    }
+    path = pmf_path_cache_get(path_id);
+    if (path == NULL || !pmf_solid_brush_color(brush_id, brush_is_inline,
+                                               &color)) {
+        return 1;
+    }
+
+    fprintf(out, "<%spath d=\"", states->nameSpaceString);
+    if (!pmf_path_data_draw(path, out, states)) {
+        fprintf(out, "\" />\n");
+        return 0;
+    }
+    fprintf(out, "\" fill=\"#%02X%02X%02X\" fill-opacity=\"%.4f\" "
+                 "stroke=\"none\" />\n",
+            color.Red, color.Green, color.Blue, color.Alpha / 255.0);
+    return 1;
 }
 
 /**
@@ -2173,9 +2688,13 @@ int U_PMR_OBJECT_draw(const char *contents, const char *blimit,
             (void)U_PMF_BRUSH_draw(ObjCont->accum, out, states);
             break;
         case U_OT_Pen:
+            (void)pmf_pen_cache_store((uint32_t)ObjCont->Id, ObjCont->accum,
+                                      ObjCont->accum + ObjCont->used);
             (void)U_PMF_PEN_draw(ObjCont->accum, out, states);
             break;
         case U_OT_Path:
+            (void)pmf_path_cache_store((uint32_t)ObjCont->Id, ObjCont->accum,
+                                       ObjCont->accum + ObjCont->used);
             (void)U_PMF_PATH_draw(ObjCont->accum, out, states);
             break;
         case U_OT_Region:

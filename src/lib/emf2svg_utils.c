@@ -1175,11 +1175,96 @@ void text_style_draw(FILE *out, drawingStates *states, POINT_D Org) {
     fprintf(out, "font-size=\"%.4f\" ", font_height);
 }
 
+/* Return the optional Dx array offset for an EMRTEXT payload. */
+static uint32_t text_dx_offset(drawingStates *states, const char *contents,
+                               const U_EMRTEXT *pemt) {
+    uint32_t off = sizeof(U_EMRTEXT);
+    uint32_t off_dx = 0;
+
+    if (states == NULL || contents == NULL || pemt == NULL) {
+        return 0;
+    }
+    if (!(pemt->fOptions & U_ETO_NO_RECT)) {
+        off += sizeof(U_RECTL);
+    }
+    if (checkOutOfEMF(states,
+                      (uintptr_t)((const char *)pemt + off +
+                                  sizeof(off_dx)))) {
+        return 0;
+    }
+    memcpy(&off_dx, (const char *)pemt + off, sizeof(off_dx));
+    return off_dx;
+}
+
+/* Sum the logical x advance carried by an EMRTEXT Dx array. */
+static int64_t text_dx_advance(drawingStates *states, const char *contents,
+                               const U_EMRTEXT *pemt) {
+    uint32_t off_dx = text_dx_offset(states, contents, pemt);
+    uint32_t step;
+    uint32_t i;
+    int64_t advance = 0;
+
+    if (off_dx == 0 || pemt == NULL) {
+        return 0;
+    }
+    step = (pemt->fOptions & U_ETO_PDY) ? 2 : 1;
+    if (checkOutOfEMF(states,
+                      (uintptr_t)(contents + off_dx +
+                                  pemt->nChars * step * sizeof(uint32_t)))) {
+        return 0;
+    }
+    for (i = 0; i < pemt->nChars; i++) {
+        int32_t dx = 0;
+        memcpy(&dx, contents + off_dx + i * step * sizeof(uint32_t),
+               sizeof(dx));
+        advance += dx;
+    }
+    return advance;
+}
+
+/* Return true when ExtTextOut must use the MoveTo current point as origin. */
+static bool text_uses_current_point(drawingStates *states,
+                                    const U_EMRTEXT *pemt) {
+    return pemt != NULL && pemt->nChars > 0 &&
+           (states->currentDeviceContext.text_align & U_TA_UPDATECP) ==
+               U_TA_UPDATECP;
+}
+
+/*
+ * Use the MoveTo current point for non-empty TA_UPDATECP text records.
+ * MathType EMFs such as test-formula.emf store ptlReference as {0,0}; the
+ * actual text origin is the current point set by the preceding MOVETOEX.
+ */
+static POINT_D text_origin(drawingStates *states, const U_EMRTEXT *pemt) {
+    double x = (double)pemt->ptlReference.x;
+    double y = (double)pemt->ptlReference.y;
+
+    if (text_uses_current_point(states, pemt)) {
+        x = states->cur_x;
+        y = states->cur_y;
+    }
+    return point_cal(states, x, y);
+}
+
+/* Advance the MoveTo current point after TA_UPDATECP text records. */
+static void text_current_point_update(drawingStates *states,
+                                      const char *contents,
+                                      const U_EMRTEXT *pemt) {
+    if ((states->currentDeviceContext.text_align & U_TA_UPDATECP) !=
+        U_TA_UPDATECP) {
+        return;
+    }
+    if (pemt == NULL || pemt->nChars == 0 ||
+        text_dx_offset(states, contents, pemt) == 0) {
+        return;
+    }
+    states->cur_x += (double)text_dx_advance(states, contents, pemt);
+}
+
 /* Build absolute SVG x positions from EMR text Dx advances. */
 static double *text_dx_positions(drawingStates *states, const char *contents,
                                  const U_EMRTEXT *pemt, double origin_x) {
-    uint32_t off = sizeof(U_EMRTEXT);
-    uint32_t off_dx = 0;
+    uint32_t off_dx = text_dx_offset(states, contents, pemt);
     int64_t logical_x = 0;
     double *positions;
     uint32_t step;
@@ -1188,13 +1273,6 @@ static double *text_dx_positions(drawingStates *states, const char *contents,
     if (states == NULL || contents == NULL || pemt == NULL || pemt->nChars < 2) {
         return NULL;
     }
-    if (!(pemt->fOptions & U_ETO_NO_RECT)) {
-        off += sizeof(U_RECTL);
-    }
-    if (checkOutOfEMF(states, (uintptr_t)((const char *)pemt + off + sizeof(off_dx)))) {
-        return NULL;
-    }
-    memcpy(&off_dx, (const char *)pemt + off, sizeof(off_dx));
     step = (pemt->fOptions & U_ETO_PDY) ? 2 : 1;
     if (off_dx == 0 ||
         checkOutOfEMF(states, (uintptr_t)(contents + off_dx + pemt->nChars * step * sizeof(uint32_t)))) {
@@ -2149,6 +2227,7 @@ void text_draw(const char *contents, FILE *out, drawingStates *states,
     PU_EMRTEXT pemt =
         (PU_EMRTEXT)(contents + sizeof(U_EMREXTTEXTOUTA) - sizeof(U_EMRTEXT));
     double *positions = NULL;
+    bool text_clip_group_open = false;
 
     returnOutOfEmf(pemt);
 
@@ -2156,10 +2235,26 @@ void text_draw(const char *contents, FILE *out, drawingStates *states,
         type = FONTINDEX;
     }
 
+    /*
+     * Keep page-space clips outside the active world transform. Otherwise SVG
+     * clips TA_UPDATECP formula text against logical text coordinates.
+     */
+    if (text_uses_current_point(states, pemt) &&
+        states->currentDeviceContext.clipID && states->transform_open) {
+        fprintf(out, "</%sg>\n", states->nameSpaceString);
+        states->transform_open = false;
+        fprintf(out, "<%sg", states->nameSpaceString);
+        clipset_draw(states, out);
+        fprintf(out, ">\n");
+        transform_draw(states, out);
+        text_clip_group_open = true;
+    }
+
     fprintf(out, "<%stext ", states->nameSpaceString);
-    clipset_draw(states, out);
-    POINT_D Org = point_cal(states, (double)pemt->ptlReference.x,
-                            (double)pemt->ptlReference.y);
+    if (!text_clip_group_open) {
+        clipset_draw(states, out);
+    }
+    POINT_D Org = text_origin(states, pemt);
     positions = text_dx_positions(states, contents, pemt, Org.x);
 
     text_style_draw(out, states, Org);
@@ -2195,7 +2290,14 @@ void text_draw(const char *contents, FILE *out, drawingStates *states,
     if (type == FONTINDEX && emitted_empty_glyph_index_text) {
         text_glyph_index_empty_warn();
     }
+    text_current_point_update(states, contents, pemt);
     fprintf(out, "</%stext>\n", states->nameSpaceString);
+    if (text_clip_group_open) {
+        fprintf(out, "</%sg>\n", states->nameSpaceString);
+        fprintf(out, "</%sg>\n", states->nameSpaceString);
+        states->transform_open = false;
+        transform_draw(states, out);
+    }
 }
 void transform_draw(drawingStates *states, FILE *out) {
     // transformation could be set inside path.
