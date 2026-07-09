@@ -272,6 +272,68 @@ static void bitmap_rop_mask_clear(drawingStates *states) {
 }
 
 /**
+  \brief Track the solid brush wrapped by a skipped PATINVERT operation.
+
+  Some GDI fallback streams, including test-188.emf, surround a monochrome mask
+  path with two PATINVERT BitBlt records. SVG cannot represent destination XOR,
+  so the rectangle blits are skipped and the mask path is painted with the
+  remembered solid brush color instead.
+  */
+static void bitblt_patinvert_brush_toggle(drawingStates *states,
+                                          const imageDestBox *box) {
+    uint8_t red = states->currentDeviceContext.fill_red;
+    uint8_t green = states->currentDeviceContext.fill_green;
+    uint8_t blue = states->currentDeviceContext.fill_blue;
+
+    if (states->currentDeviceContext.fill_mode != U_BS_SOLID) {
+        states->patinvertBrush.active = false;
+        return;
+    }
+
+    if (states->patinvertBrush.active && states->patinvertBrush.red == red &&
+        states->patinvertBrush.green == green &&
+        states->patinvertBrush.blue == blue) {
+        states->patinvertBrush.active = false;
+        return;
+    }
+
+    states->patinvertBrush.active = true;
+    states->patinvertBrush.consumed = false;
+    states->patinvertBrush.position = box->position;
+    states->patinvertBrush.size = box->size;
+    states->patinvertBrush.red = red;
+    states->patinvertBrush.green = green;
+    states->patinvertBrush.blue = blue;
+}
+
+/**
+  \brief Emit a delayed PATINVERT rectangle if no path mask consumed it.
+
+  Delaying preserves standalone PATINVERT rectangles in samples such as
+  test-039.emf while still allowing test-188.emf's following mask path to use
+  the remembered brush color and suppress the rectangle.
+  */
+void bitmap_patinvert_brush_flush(FILE *out, drawingStates *states) {
+    pendingPatinvertBrush *brush = &states->patinvertBrush;
+
+    if (!brush->active) {
+        return;
+    }
+    if (!brush->consumed) {
+        fprintf(out,
+                "<%spath style=\"fill:#%02x%02x%02x\" "
+                "d=\"M %.4f,%.4f L %.4f,%.4f L %.4f,%.4f L %.4f,%.4f Z\" />",
+                states->nameSpaceString, brush->red, brush->green, brush->blue,
+                brush->position.x, brush->position.y,
+                brush->position.x + brush->size.x, brush->position.y,
+                brush->position.x + brush->size.x,
+                brush->position.y + brush->size.y, brush->position.x,
+                brush->position.y + brush->size.y);
+    }
+    memset(brush, 0, sizeof(*brush));
+}
+
+/**
   \brief Return whether a STRETCHDIBITS record is the mask half of a ROP pair.
 
   Some EMF producers encode transparent images as a 1bpp SRCPAINT mask followed
@@ -421,12 +483,33 @@ void U_EMRBITBLT_draw(const char *contents, FILE *out, drawingStates *states) {
     }
     PU_EMRBITBLT pEmr = (PU_EMRBITBLT)(contents);
 
+    if (!(pEmr->cbBitsSrc == 0 && pEmr->dwRop == U_PATINVERT)) {
+        bitmap_patinvert_brush_flush(out, states);
+    }
+
     // if no bitmap, check for pattern brush
     // Should fill the output with the current brush and the raster operation
     if (pEmr->cbBitsSrc == 0) {
         char style[256];
+        imageDestBox box;
         if (pEmr->dwRop == U_NOOP)
             return;
+        POINT_D size =
+            point_cal(states, (double)pEmr->cDest.x, (double)pEmr->cDest.y);
+        POINT_D position =
+            point_cal(states, (double)pEmr->Dest.x, (double)pEmr->Dest.y);
+        box.position = position;
+        box.size = size;
+        box.flip_x = false;
+        box.flip_y = false;
+        if (pEmr->dwRop == U_PATINVERT) {
+            bitblt_patinvert_brush_toggle(states, &box);
+            // PATINVERT is an XOR operation; treating it as PATCOPY paints a
+            // solid rectangle over files such as test-188.emf.
+            verbose_printf("   Status:         %sSKIPPED UNSUPPORTED ROP%s\n",
+                           KYEL, KNRM);
+            return;
+        }
         if (states->currentDeviceContext.fill_mode == U_BS_MONOPATTERN) {
             sprintf(style, "fill:url(#img-%d-ref);",
                     states->currentDeviceContext.fill_idx);
@@ -439,10 +522,6 @@ void U_EMRBITBLT_draw(const char *contents, FILE *out, drawingStates *states) {
             style[0] = '\0';
         }
         if (style[0]) {
-            POINT_D size =
-                point_cal(states, (double)pEmr->cDest.x, (double)pEmr->cDest.y);
-            POINT_D position =
-                point_cal(states, (double)pEmr->Dest.x, (double)pEmr->Dest.y);
             fprintf(out, "<%spath style=\"%s", states->nameSpaceString, style);
             fprintf(
                 out,

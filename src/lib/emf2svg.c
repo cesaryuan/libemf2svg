@@ -13,6 +13,64 @@ extern "C" {
 #include <string.h>
 #include <internal-fmem.h>
 
+/**
+  \brief Return whether a record can still belong to a pending PATINVERT mask.
+
+  test-188.emf builds a path mask between two PATINVERT BitBlt records. The
+  delayed PATINVERT rectangle must survive state/object/path setup records, but
+  it must be flushed before unrelated visible drawing records.
+  */
+static bool patinvert_mask_sequence_allows_record(uint32_t type,
+                                                  drawingStates *states) {
+    switch (type) {
+    case U_EMR_SETROP2:
+    case U_EMR_SETTEXTCOLOR:
+    case U_EMR_SETBKCOLOR:
+    case U_EMR_SETBKMODE:
+    case U_EMR_SETTEXTALIGN:
+    case U_EMR_MODIFYWORLDTRANSFORM:
+    case U_EMR_SETWORLDTRANSFORM:
+    case U_EMR_SETICMMODE:
+    case U_EMR_SETPOLYFILLMODE:
+    case U_EMR_SELECTOBJECT:
+    case U_EMR_CREATEBRUSHINDIRECT:
+    case U_EMR_CREATEDIBPATTERNBRUSHPT:
+    case U_EMR_CREATEMONOBRUSH:
+    case U_EMR_DELETEOBJECT:
+    case U_EMR_BEGINPATH:
+    case U_EMR_MOVETOEX:
+    case U_EMR_CLOSEFIGURE:
+    case U_EMR_ENDPATH:
+    case U_EMR_FILLPATH:
+    case U_EMR_STROKEANDFILLPATH:
+    case U_EMR_STROKEPATH:
+    case U_EMR_BITBLT:
+    case U_EMR_COMMENT:
+        return true;
+    case U_EMR_POLYBEZIER:
+    case U_EMR_POLYGON:
+    case U_EMR_POLYLINE:
+    case U_EMR_POLYBEZIERTO:
+    case U_EMR_POLYLINETO:
+    case U_EMR_POLYPOLYLINE:
+    case U_EMR_POLYPOLYGON:
+    case U_EMR_LINETO:
+    case U_EMR_ARCTO:
+    case U_EMR_POLYDRAW:
+    case U_EMR_POLYBEZIER16:
+    case U_EMR_POLYGON16:
+    case U_EMR_POLYLINE16:
+    case U_EMR_POLYBEZIERTO16:
+    case U_EMR_POLYLINETO16:
+    case U_EMR_POLYPOLYLINE16:
+    case U_EMR_POLYPOLYGON16:
+    case U_EMR_POLYDRAW16:
+        return states->inPath;
+    default:
+        return false;
+    }
+}
+
 int U_emf_onerec_is_emfp(const char *contents, const char *blimit, int recnum,
                          size_t off, bool *ret) {
     PU_ENHMETARECORD lpEMFR = (PU_ENHMETARECORD)(contents + off);
@@ -288,6 +346,9 @@ int U_emf_onerec_draw(const char *contents, const char *blimit, int recnum,
 
     if (lpEMFR->iType != U_EMR_STRETCHDIBITS) {
         bitmap_rop_mask_flush(out, states);
+    }
+    if (!patinvert_mask_sequence_allows_record(lpEMFR->iType, states)) {
+        bitmap_patinvert_brush_flush(out, states);
     }
 
     switch (lpEMFR->iType) {

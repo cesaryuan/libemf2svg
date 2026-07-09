@@ -273,6 +273,16 @@ typedef struct emfPlusImageBox {
 
 #define EMFPLUS_RECENT_IMAGE_BOX_COUNT 8
 
+typedef struct pendingPatinvertBrush {
+    bool active;
+    bool consumed;
+    POINT_D position;
+    POINT_D size;
+    uint8_t red;
+    uint8_t green;
+    uint8_t blue;
+} pendingPatinvertBrush;
+
 // structure recording drawing states
 typedef struct {
     // unique ID (simple increment)
@@ -355,6 +365,8 @@ typedef struct {
     // Recently emitted EMF+ bitmap boxes used to suppress matching GDI fallback.
     emfPlusImageBox recentEmfPlusImages[EMFPLUS_RECENT_IMAGE_BOX_COUNT];
     size_t recentEmfPlusImageNext;
+    // Solid brush color from a skipped PATINVERT pair for masked path fills.
+    pendingPatinvertBrush patinvertBrush;
 } drawingStates;
 
 typedef struct cmap_collection {
@@ -600,6 +612,7 @@ void U_EMRPAINTRGN_draw(const char *contents, FILE *out, drawingStates *states);
 void U_EMREXTSELECTCLIPRGN_draw(const char *contents, FILE *out,
                                 drawingStates *states);
 void U_EMRBITBLT_draw(const char *contents, FILE *out, drawingStates *states);
+void bitmap_patinvert_brush_flush(FILE *out, drawingStates *states);
 void U_EMRSTRETCHBLT_draw(const char *contents, FILE *out,
                           drawingStates *states);
 void U_EMRMASKBLT_draw(const char *contents, FILE *out, drawingStates *states);

@@ -321,8 +321,18 @@ void fill_draw(drawingStates *states, FILE *out, bool *filled, bool *stroked) {
         *filled = true;
         break;
     case U_BS_MONOPATTERN:
-        fprintf(out, "fill=\"#img-%d-ref\" ",
-                states->currentDeviceContext.fill_idx);
+        // PATINVERT fallback masks need the skipped XOR brush color, otherwise
+        // test-188.emf either disappears or renders as a full rectangle.
+        if (states->patinvertBrush.active) {
+            fprintf(out, "fill=\"#%02X%02X%02X\" ",
+                    states->patinvertBrush.red,
+                    states->patinvertBrush.green,
+                    states->patinvertBrush.blue);
+            states->patinvertBrush.consumed = true;
+        } else {
+            fprintf(out, "fill=\"url(#img-%d-ref)\" ",
+                    states->currentDeviceContext.fill_idx);
+        }
         *filled = true;
         break;
     case U_BS_HATCHED:
