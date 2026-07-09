@@ -232,13 +232,8 @@ void U_EMRHEADER_draw(const char *contents, FILE *out, drawingStates *states) {
             double brokenYTranslateX =
                 fabs(states->RefX) > 1.0 ? -1.0 * states->RefX * states->scaling
                                           : 0.0;
-            if (brokenYTranslateX == 0.0) {
-                fprintf(out, "<%sg transform=\"translate(0.0000, 0.00 00)\">\n",
-                        states->nameSpaceString);
-            } else {
-                fprintf(out, "<%sg transform=\"translate(%.4f, 0.0000)\">\n",
-                        states->nameSpaceString, brokenYTranslateX);
-            }
+            fprintf(out, "<%sg transform=\"translate(%.4f, 0.0000)\">\n",
+                    states->nameSpaceString, brokenYTranslateX);
         } else {
             fprintf(out, " width=\"%.4f\" height=\"%.4f\">\n", states->imgWidth,
                 states->imgHeight);
