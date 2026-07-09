@@ -38,6 +38,7 @@ RESIZE_OPTS=""
 VERBOSE_OPT=""
 DETAIL_DIFF=""
 CHANGED_LIST=""
+EMFPLUS_ENABLED="1"
 ret=0
 
 if [ "$ACTION" = "-h" ] || [ "$ACTION" = "--help" ]
@@ -111,7 +112,7 @@ configure_format(){
 help(){
     configure_format || exit 1
     cat <<EOF
-usage: `basename "$0"` save|check [-h] [-e <input dir>] [-d <snapshot dir>] [-o <work dir>] [-r] [-v] [--format emf|wmf] [--detail-diff <sample path>]
+usage: `basename "$0"` save|check [-h] [-e <input dir>] [-d <snapshot dir>] [-o <work dir>] [-r] [-v] [--format emf|wmf] [--emfplus on|off] [--detail-diff <sample path>]
 
 Create or compare SVG snapshots for emf2svg-conv and wmf2emf-conv.
 Without --format, save and check run both EMF and WMF snapshots.
@@ -126,6 +127,7 @@ arguments:
   -d: snapshot dir (use with --format for one format)
   -o: temporary output dir for check (use with --format for one format)
   --format: snapshot format, 'emf' or 'wmf' (default: both)
+  --emfplus: pass '-p' to emf2svg-conv, 'on' by default
   -r: resize to 800x600 before snapshotting
   -v: verbose converter output
   --detail-diff: print a unified diff for one changed sample
@@ -146,11 +148,22 @@ log_convert(){
     fi
 }
 
+# Return the emf2svg-conv CLI options controlled by snapshot flags.
+emf2svg_opts(){
+    if [ "$EMFPLUS_ENABLED" = "1" ]
+    then
+        printf "%s" "-p $RESIZE_OPTS"
+    else
+        printf "%s" "$RESIZE_OPTS"
+    fi
+}
+
 # Convert one input file into a matching SVG snapshot.
 convert_snapshot(){
     input="$1"
     output="$2"
     rel="$3"
+    emf2svg_args="`emf2svg_opts`"
 
     if [ "$FORMAT" = "wmf" ]
     then
@@ -163,11 +176,11 @@ convert_snapshot(){
             printf "[snapshot] ERROR: wmf2emf-conv failed on '%s'\n" "$input"
             return $tmpret
         fi
-        "$EMF2SVG_CMD" -p $RESIZE_OPTS -i "$emf_tmp" -o "$output" $VERBOSE_OPT
+        "$EMF2SVG_CMD" $emf2svg_args -i "$emf_tmp" -o "$output" $VERBOSE_OPT
         return $?
     fi
 
-    "$EMF2SVG_CMD" -p $RESIZE_OPTS -i "$input" -o "$output" $VERBOSE_OPT
+    "$EMF2SVG_CMD" $emf2svg_args -i "$input" -o "$output" $VERBOSE_OPT
 }
 
 # Convert every input file into a matching SVG snapshot.
@@ -351,6 +364,12 @@ run_snapshot_action(){
     EMFDIR="`cd "$EMFDIR" && pwd -P`"
 
     log_info "format: $FORMAT"
+    if [ "$EMFPLUS_ENABLED" = "1" ]
+    then
+        log_info "emfplus: on"
+    else
+        log_info "emfplus: off"
+    fi
 
     if [ "$ACTION" = "save" ]
     then
@@ -451,6 +470,28 @@ do
             exit 1
         fi
         RUN_FORMATS="$1"
+        ;;
+    --emfplus)
+        shift
+        if [ $# -eq 0 ]
+        then
+            echo "Option --emfplus requires an argument." >&2
+            help
+            exit 1
+        fi
+        case "$1" in
+            on)
+                EMFPLUS_ENABLED="1"
+                ;;
+            off)
+                EMFPLUS_ENABLED=""
+                ;;
+            *)
+                echo "Option --emfplus expects 'on' or 'off'." >&2
+                help
+                exit 1
+                ;;
+        esac
         ;;
     -r)
         RESIZE_OPTS="-w 800 -h 600"
