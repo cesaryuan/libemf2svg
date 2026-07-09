@@ -227,8 +227,18 @@ void U_EMRHEADER_draw(const char *contents, FILE *out, drawingStates *states) {
             fprintf(out, " width=\"%.4f\" height=\"%.4f\">\n",
                 states->imgWidth + 1,
                 states->imgHeight + 1);
-            fprintf(out, "<%sg transform=\"translate(0.0000, 0.00 00)\">\n",
-                    states->nameSpaceString);
+            // Broken-Y files still need real X origin shifts, but ignore the
+            // common 1px inclusive-bounds noise to avoid baseline drift.
+            double brokenYTranslateX =
+                fabs(states->RefX) > 1.0 ? -1.0 * states->RefX * states->scaling
+                                          : 0.0;
+            if (brokenYTranslateX == 0.0) {
+                fprintf(out, "<%sg transform=\"translate(0.0000, 0.00 00)\">\n",
+                        states->nameSpaceString);
+            } else {
+                fprintf(out, "<%sg transform=\"translate(%.4f, 0.0000)\">\n",
+                        states->nameSpaceString, brokenYTranslateX);
+            }
         } else {
             fprintf(out, " width=\"%.4f\" height=\"%.4f\">\n", states->imgWidth,
                 states->imgHeight);
