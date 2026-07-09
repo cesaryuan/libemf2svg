@@ -278,6 +278,7 @@ typedef struct pendingPatinvertBrush {
     bool consumed;
     POINT_D position;
     POINT_D size;
+    U_RECTL bounds;
     uint8_t red;
     uint8_t green;
     uint8_t blue;

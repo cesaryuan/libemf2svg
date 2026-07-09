@@ -16,9 +16,10 @@ extern "C" {
 /**
   \brief Return whether a record can still belong to a pending PATINVERT mask.
 
-  test-188.emf builds a path mask between two PATINVERT BitBlt records. The
-  delayed PATINVERT rectangle must survive state/object/path setup records, but
-  it must be flushed before unrelated visible drawing records.
+  test-188.emf builds a path mask between two PATINVERT BitBlt records, while
+  test-189.emf uses ordinary polygon records for the same GDI fallback pattern.
+  The delayed PATINVERT rectangle must survive mask setup and mask drawing
+  records, but it must be flushed before unrelated visible drawing records.
   */
 static bool patinvert_mask_sequence_allows_record(uint32_t type,
                                                   drawingStates *states) {
@@ -65,7 +66,7 @@ static bool patinvert_mask_sequence_allows_record(uint32_t type,
     case U_EMR_POLYPOLYLINE16:
     case U_EMR_POLYPOLYGON16:
     case U_EMR_POLYDRAW16:
-        return states->inPath;
+        return states->inPath || states->patinvertBrush.active;
     default:
         return false;
     }

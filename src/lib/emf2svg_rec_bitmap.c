@@ -280,7 +280,8 @@ static void bitmap_rop_mask_clear(drawingStates *states) {
   remembered solid brush color instead.
   */
 static void bitblt_patinvert_brush_toggle(drawingStates *states,
-                                          const imageDestBox *box) {
+                                           const imageDestBox *box,
+                                           U_RECTL bounds) {
     uint8_t red = states->currentDeviceContext.fill_red;
     uint8_t green = states->currentDeviceContext.fill_green;
     uint8_t blue = states->currentDeviceContext.fill_blue;
@@ -314,6 +315,7 @@ static void bitblt_patinvert_brush_toggle(drawingStates *states,
     states->patinvertBrush.consumed = false;
     states->patinvertBrush.position = box->position;
     states->patinvertBrush.size = box->size;
+    states->patinvertBrush.bounds = bounds;
     states->patinvertBrush.red = red;
     states->patinvertBrush.green = green;
     states->patinvertBrush.blue = blue;
@@ -329,11 +331,28 @@ static void bitblt_patinvert_brush_toggle(drawingStates *states,
   */
 void bitmap_patinvert_brush_flush(FILE *out, drawingStates *states) {
     pendingPatinvertBrush *brush = &states->patinvertBrush;
+    bool moved_world_transform = false;
 
     if (!brush->active) {
         return;
     }
     if (!brush->consumed) {
+        imageDestBox box;
+
+        box.position = brush->position;
+        box.size = brush->size;
+        box.flip_x = false;
+        box.flip_y = false;
+        /*
+         * test-189.emf delays PATINVERT fallback rectangles across a later
+         * world-transform change. The rectangle is already in device space, so
+         * temporarily close the transform group or it becomes a tiny duplicate.
+         */
+        if (states->transform_open && image_dest_matches_bounds(&box, brush->bounds)) {
+            fprintf(out, "</%sg>\n", states->nameSpaceString);
+            states->transform_open = false;
+            moved_world_transform = true;
+        }
         fprintf(out,
                 "<%spath style=\"fill:#%02x%02x%02x\" "
                 "d=\"M %.4f,%.4f L %.4f,%.4f L %.4f,%.4f L %.4f,%.4f Z\" ",
@@ -347,6 +366,9 @@ void bitmap_patinvert_brush_flush(FILE *out, drawingStates *states) {
             fprintf(out, "fill-opacity=\"%.4f\" ", brush->alpha / 255.0);
         }
         fprintf(out, "/>");
+        if (moved_world_transform) {
+            transform_draw(states, out);
+        }
     }
     memset(brush, 0, sizeof(*brush));
 }
@@ -512,16 +534,10 @@ void U_EMRBITBLT_draw(const char *contents, FILE *out, drawingStates *states) {
         imageDestBox box;
         if (pEmr->dwRop == U_NOOP)
             return;
-        POINT_D size =
-            point_cal(states, (double)pEmr->cDest.x, (double)pEmr->cDest.y);
-        POINT_D position =
-            point_cal(states, (double)pEmr->Dest.x, (double)pEmr->Dest.y);
-        box.position = position;
-        box.size = size;
-        box.flip_x = false;
-        box.flip_y = false;
+        image_dest_box(states, pEmr->Dest, pEmr->cDest, pEmr->cDest.x,
+                       pEmr->cDest.y, &box);
         if (pEmr->dwRop == U_PATINVERT) {
-            bitblt_patinvert_brush_toggle(states, &box);
+            bitblt_patinvert_brush_toggle(states, &box, pEmr->rclBounds);
             // PATINVERT is an XOR operation; treating it as PATCOPY paints a
             // solid rectangle over files such as test-188.emf.
             verbose_printf("   Status:         %sSKIPPED UNSUPPORTED ROP%s\n",
@@ -544,9 +560,10 @@ void U_EMRBITBLT_draw(const char *contents, FILE *out, drawingStates *states) {
             fprintf(
                 out,
                 "\" d=\"M %.4f,%.4f L %.4f,%.4f L %.4f,%.4f L %.4f,%.4f Z\" />",
-                position.x, position.y, position.x + size.x, position.y,
-                position.x + size.x, position.y + size.y, position.x,
-                position.y + size.y);
+                box.position.x, box.position.y, box.position.x + box.size.x,
+                box.position.y, box.position.x + box.size.x,
+                box.position.y + box.size.y, box.position.x,
+                box.position.y + box.size.y);
         }
         // else
         // FIXME - non MONOBRUSH
