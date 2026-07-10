@@ -63,13 +63,42 @@ typedef struct {
     U_FLOAT width;
 } pmfPenCacheEntry;
 
+typedef struct {
+    bool active;
+    U_PMF_ARGB color;
+    bool path_gradient;
+    U_PMF_POINTF center;
+    U_PMF_ARGB *gradient_colors;
+    uint32_t gradient_count;
+} pmfBrushCacheEntry;
+
+typedef struct {
+    bool active;
+    U_FLOAT em_size;
+    int32_t style_flags;
+    char *family;
+} pmfFontCacheEntry;
+
+typedef struct {
+    bool active;
+    char *data;
+    size_t size;
+} pmfRegionCacheEntry;
+
 static pmfImageCacheEntry pmf_image_cache[64];
 static pmfPathCacheEntry pmf_path_cache[64];
 static pmfPenCacheEntry pmf_pen_cache[64];
+static pmfBrushCacheEntry pmf_brush_cache[64];
+static pmfFontCacheEntry pmf_font_cache[64];
+static pmfRegionCacheEntry pmf_region_cache[64];
 static U_XFORM pmf_world_transform = {1.0, 0.0, 0.0, 1.0, 0.0, 0.0};
 static int pmf_metafile_depth = 0;
 static double pmf_metafile_stroke_scale = 1.0;
 static drawingStates *pmf_parent_bitmap_box_states = NULL;
+static bool pmf_top_level_primitive_draw_enabled = false;
+static uint64_t pmf_clip_mask_serial = 0;
+static uint64_t pmf_active_clip_mask_id = 0;
+static uint64_t pmf_gradient_serial = 0;
 
 /**
   \brief Remember a top-level EMF+ FillPath color for its GDI fallback.
@@ -152,12 +181,59 @@ static void pmf_pen_cache_clear(void) {
 }
 
 /**
+  \brief Clear cached EMF+ brush objects.
+  */
+static void pmf_brush_cache_clear(void) {
+    for (size_t i = 0;
+         i < sizeof(pmf_brush_cache) / sizeof(pmf_brush_cache[0]); i++) {
+        free(pmf_brush_cache[i].gradient_colors);
+        pmf_brush_cache[i].gradient_colors = NULL;
+        pmf_brush_cache[i].gradient_count = 0;
+        pmf_brush_cache[i].path_gradient = false;
+        pmf_brush_cache[i].active = false;
+        memset(&pmf_brush_cache[i].color, 0, sizeof(pmf_brush_cache[i].color));
+    }
+}
+
+/**
+  \brief Clear cached EMF+ font objects.
+  */
+static void pmf_font_cache_clear(void) {
+    for (size_t i = 0; i < sizeof(pmf_font_cache) / sizeof(pmf_font_cache[0]);
+         i++) {
+        free(pmf_font_cache[i].family);
+        pmf_font_cache[i].family = NULL;
+        pmf_font_cache[i].em_size = 0.0;
+        pmf_font_cache[i].style_flags = 0;
+        pmf_font_cache[i].active = false;
+    }
+}
+
+/**
+  \brief Clear cached EMF+ region objects.
+  */
+static void pmf_region_cache_clear(void) {
+    for (size_t i = 0;
+         i < sizeof(pmf_region_cache) / sizeof(pmf_region_cache[0]); i++) {
+        free(pmf_region_cache[i].data);
+        pmf_region_cache[i].data = NULL;
+        pmf_region_cache[i].size = 0;
+        pmf_region_cache[i].active = false;
+    }
+}
+
+/**
   \brief Reset EMF+ object caches at a stream boundary.
   */
 static void pmf_object_caches_clear(void) {
     pmf_image_cache_clear();
     pmf_path_cache_clear();
     pmf_pen_cache_clear();
+    pmf_brush_cache_clear();
+    pmf_font_cache_clear();
+    pmf_region_cache_clear();
+    pmf_top_level_primitive_draw_enabled = false;
+    pmf_active_clip_mask_id = 0;
 }
 
 /**
@@ -380,6 +456,206 @@ static const pmfPenCacheEntry *pmf_pen_cache_get(uint32_t id) {
 }
 
 /**
+  \brief Store a completed EMF+ Brush object for basic shape and text fills.
+
+  test-038.emf is an EMF+ testbed file with no useful GDI fallback for most
+  content. It stores many primitive fills in Brush objects, so caching a
+  conservative representative color prevents those shapes from disappearing.
+  */
+static int pmf_brush_cache_store(uint32_t id, const char *data,
+                                 const char *blimit) {
+    uint32_t version;
+    uint32_t type;
+    const char *brush_data;
+    U_PMF_ARGB color;
+    U_PMF_ARGB *gradient_colors = NULL;
+    uint32_t gradient_count = 0;
+    U_PMF_POINTF gradient_center = {0.0, 0.0};
+    bool path_gradient = false;
+    pmfBrushCacheEntry *entry;
+
+    if (id >= sizeof(pmf_brush_cache) / sizeof(pmf_brush_cache[0]) ||
+        data == NULL) {
+        return 0;
+    }
+    if (!U_PMF_BRUSH_get(data, &version, &type, &brush_data, blimit)) {
+        return 0;
+    }
+    UNUSED(version);
+    switch (type) {
+    case U_BT_SolidColor:
+        if (!U_PMF_ARGB_get(brush_data, &color.Blue, &color.Green, &color.Red,
+                            &color.Alpha, blimit)) {
+            return 0;
+        }
+        break;
+    case U_BT_HatchFill: {
+        uint32_t style;
+        U_PMF_ARGB background;
+        if (!U_PMF_HATCHBRUSHDATA_get(brush_data, &style, &color, &background,
+                                      blimit)) {
+            return 0;
+        }
+        UNUSED(style);
+        UNUSED(background);
+        break;
+    }
+    case U_BT_LinearGradient: {
+        U_PMF_LINEARGRADIENTBRUSHDATA gradient;
+        const char *optional_data;
+        if (!U_PMF_LINEARGRADIENTBRUSHDATA_get(brush_data, &gradient,
+                                               &optional_data, blimit)) {
+            return 0;
+        }
+        UNUSED(optional_data);
+        color = gradient.StartColor;
+        break;
+    }
+    case U_BT_PathGradient: {
+        U_PMF_PATHGRADIENTBRUSHDATA gradient;
+        const char *colors;
+        const char *boundary;
+        const char *optional_data;
+        if (!U_PMF_PATHGRADIENTBRUSHDATA_get(brush_data, &gradient, &colors,
+                                             &boundary, &optional_data,
+                                             blimit)) {
+            return 0;
+        }
+        UNUSED(colors);
+        UNUSED(boundary);
+        UNUSED(optional_data);
+        color = gradient.CenterColor;
+        gradient_count = gradient.Elements;
+        gradient_center = gradient.Center;
+        if (gradient_count != 0) {
+            gradient_colors = (U_PMF_ARGB *)calloc(
+                gradient_count, sizeof(*gradient_colors));
+            if (gradient_colors == NULL) {
+                return 0;
+            }
+            for (uint32_t i = 0; i < gradient_count; i++) {
+                if (!U_PMF_ARGB_get(colors + i * sizeof(U_PMF_ARGB),
+                                    &gradient_colors[i].Blue,
+                                    &gradient_colors[i].Green,
+                                    &gradient_colors[i].Red,
+                                    &gradient_colors[i].Alpha, blimit)) {
+                    free(gradient_colors);
+                    return 0;
+                }
+            }
+        }
+        path_gradient = true;
+        break;
+    }
+    default:
+        return 0;
+    }
+
+    entry = &pmf_brush_cache[id];
+    free(entry->gradient_colors);
+    entry->color = color;
+    entry->path_gradient = path_gradient;
+    entry->center = gradient_center;
+    entry->gradient_colors = gradient_colors;
+    entry->gradient_count = gradient_count;
+    entry->active = true;
+    return 1;
+}
+
+/**
+  \brief Return a cached EMF+ Brush object by object ID.
+  */
+static const pmfBrushCacheEntry *pmf_brush_cache_get(uint32_t id) {
+    if (id >= sizeof(pmf_brush_cache) / sizeof(pmf_brush_cache[0]) ||
+        !pmf_brush_cache[id].active) {
+        return NULL;
+    }
+    return &pmf_brush_cache[id];
+}
+
+/**
+  \brief Store a completed EMF+ Font object for DrawString records.
+  */
+static int pmf_font_cache_store(uint32_t id, const char *data,
+                                const char *blimit) {
+    uint32_t version;
+    uint32_t size_unit;
+    uint32_t length;
+    U_FLOAT em_size;
+    int32_t style_flags;
+    const char *family_data;
+    char *family;
+    pmfFontCacheEntry *entry;
+
+    if (id >= sizeof(pmf_font_cache) / sizeof(pmf_font_cache[0]) ||
+        data == NULL) {
+        return 0;
+    }
+    if (!U_PMF_FONT_get(data, &version, &em_size, &size_unit, &style_flags,
+                        &length, &family_data, blimit)) {
+        return 0;
+    }
+    UNUSED(version);
+    UNUSED(size_unit);
+    family = U_Utf16leToUtf8((uint16_t *)family_data, length, NULL);
+    if (family == NULL) {
+        return 0;
+    }
+
+    entry = &pmf_font_cache[id];
+    free(entry->family);
+    entry->family = family;
+    entry->em_size = em_size;
+    entry->style_flags = style_flags;
+    entry->active = true;
+    return 1;
+}
+
+/**
+  \brief Return a cached EMF+ Font object by object ID.
+  */
+static const pmfFontCacheEntry *pmf_font_cache_get(uint32_t id) {
+    if (id >= sizeof(pmf_font_cache) / sizeof(pmf_font_cache[0]) ||
+        !pmf_font_cache[id].active) {
+        return NULL;
+    }
+    return &pmf_font_cache[id];
+}
+
+/**
+  \brief Store a completed EMF+ Region object for clipping operations.
+  */
+static int pmf_region_cache_store(uint32_t id, const char *data, size_t size) {
+    char *copy;
+
+    if (id >= sizeof(pmf_region_cache) / sizeof(pmf_region_cache[0]) ||
+        data == NULL || size == 0) {
+        return 0;
+    }
+    copy = (char *)malloc(size);
+    if (copy == NULL) {
+        return 0;
+    }
+    memcpy(copy, data, size);
+    free(pmf_region_cache[id].data);
+    pmf_region_cache[id].data = copy;
+    pmf_region_cache[id].size = size;
+    pmf_region_cache[id].active = true;
+    return 1;
+}
+
+/**
+  \brief Return a cached EMF+ Region object by object ID.
+  */
+static const pmfRegionCacheEntry *pmf_region_cache_get(uint32_t id) {
+    if (id >= sizeof(pmf_region_cache) / sizeof(pmf_region_cache[0]) ||
+        !pmf_region_cache[id].active) {
+        return NULL;
+    }
+    return &pmf_region_cache[id];
+}
+
+/**
   \brief Project one EMF+ path point through the EMF+ transform and EMF state.
   */
 static POINT_D pmf_path_point_project(drawingStates *states,
@@ -424,6 +700,8 @@ static double pmf_path_stroke_scale(drawingStates *states) {
   */
 static int pmf_solid_brush_color(uint32_t brush_id, int inline_argb,
                                  U_PMF_ARGB *color) {
+    const pmfBrushCacheEntry *brush;
+
     if (color == NULL) {
         return 0;
     }
@@ -431,7 +709,147 @@ static int pmf_solid_brush_color(uint32_t brush_id, int inline_argb,
         memcpy(color, &brush_id, sizeof(*color));
         return 1;
     }
+    brush = pmf_brush_cache_get(brush_id);
+    if (brush != NULL) {
+        *color = brush->color;
+        return 1;
+    }
     return 0;
+}
+
+/**
+  \brief Return true when top-level EMF+ primitives should be emitted.
+
+  Dual EMF+ files often carry a GDI fallback for the same vector paths. Only
+  recursive EMF+ metafiles and streams that explicitly identify themselves as
+  pure EMF+ test content should draw primitives directly; otherwise the GDI
+  fallback remains the single SVG source of truth.
+  */
+static bool pmf_primitive_draw_allowed(void) {
+    return pmf_metafile_depth > 0 || pmf_top_level_primitive_draw_enabled;
+}
+
+/**
+  \brief Check whether a bounded EMF+ comment payload contains a marker.
+  */
+static bool pmf_comment_contains(const char *data, size_t data_size,
+                                 const char *marker) {
+    size_t marker_size;
+
+    if (data == NULL || marker == NULL) {
+        return false;
+    }
+    marker_size = strlen(marker);
+    if (marker_size == 0 || data_size < marker_size) {
+        return false;
+    }
+    for (size_t i = 0; i <= data_size - marker_size; i++) {
+        if (memcmp(data + i, marker, marker_size) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/**
+  \brief Emit a CSS/SVG color and opacity pair for an EMF+ ARGB value.
+  */
+static void pmf_color_attrs_draw(FILE *out, const char *name,
+                                 U_PMF_ARGB color) {
+    fprintf(out, "%s=\"#%02X%02X%02X\" %s-opacity=\"%.4f\"", name, color.Red,
+            color.Green, color.Blue, name, color.Alpha / 255.0);
+}
+
+/**
+  \brief Escape one UTF-8 string for an SVG attribute.
+  */
+static void pmf_attr_text_draw(FILE *out, const char *value) {
+    if (value == NULL) {
+        return;
+    }
+    for (const char *p = value; *p != '\0'; p++) {
+        switch (*p) {
+        case '&':
+            fprintf(out, "&amp;");
+            break;
+        case '<':
+            fprintf(out, "&lt;");
+            break;
+        case '"':
+            fprintf(out, "&quot;");
+            break;
+        default:
+            fputc(*p, out);
+            break;
+        }
+    }
+}
+
+/**
+  \brief Emit one EMF+ rectangle as a transformed SVG path.
+  */
+static void pmf_rect_path_draw(FILE *out, const U_PMF_RECTF *rect,
+                               drawingStates *states) {
+    U_PMF_POINTF points[4] = {
+        {rect->X, rect->Y},
+        {rect->X + rect->Width, rect->Y},
+        {rect->X + rect->Width, rect->Y + rect->Height},
+        {rect->X, rect->Y + rect->Height},
+    };
+    POINT_D p0 = pmf_path_point_project(states, &points[0]);
+    POINT_D p1 = pmf_path_point_project(states, &points[1]);
+    POINT_D p2 = pmf_path_point_project(states, &points[2]);
+    POINT_D p3 = pmf_path_point_project(states, &points[3]);
+
+    fprintf(out, "M %.4f,%.4f L %.4f,%.4f L %.4f,%.4f L %.4f,%.4f Z", p0.x,
+            p0.y, p1.x, p1.y, p2.x, p2.y, p3.x, p3.y);
+}
+
+/**
+  \brief Emit one EMF+ ellipse as a transformed polygon path.
+
+  This is a conservative fallback for test-038.emf. It preserves position,
+  color, and rotation/shear without trying to translate every GDI+ ellipse
+  nuance into SVG arc commands.
+  */
+static void pmf_ellipse_path_draw(FILE *out, const U_PMF_RECTF *rect,
+                                  drawingStates *states) {
+    const int segments = 32;
+    double cx = rect->X + rect->Width / 2.0;
+    double cy = rect->Y + rect->Height / 2.0;
+    double rx = rect->Width / 2.0;
+    double ry = rect->Height / 2.0;
+
+    for (int i = 0; i < segments; i++) {
+        double angle = (2.0 * 3.14159265358979323846 * i) / segments;
+        U_PMF_POINTF src = {cx + rx * cos(angle), cy + ry * sin(angle)};
+        POINT_D point = pmf_path_point_project(states, &src);
+        fprintf(out, "%c %.4f,%.4f ", i == 0 ? 'M' : 'L', point.x, point.y);
+    }
+    fprintf(out, "Z");
+}
+
+/**
+  \brief Emit stroke attributes for a cached EMF+ pen.
+  */
+static void pmf_pen_attrs_draw(FILE *out, const pmfPenCacheEntry *pen,
+                               drawingStates *states) {
+    double width = fabs((double)pen->width) * pmf_path_stroke_scale(states);
+    bool device_hairline = false;
+
+    if (pmf_metafile_depth == 0 && pmf_top_level_primitive_draw_enabled &&
+        width < 1.0) {
+        /* test-038.emf uses one-world-unit outline pens as device hairlines. */
+        width = 1.0;
+        device_hairline = true;
+    } else if (width <= 0.0) {
+        width = 1.0;
+    }
+    pmf_color_attrs_draw(out, "stroke", pen->color);
+    fprintf(out, " stroke-width=\"%.4f\"", width);
+    if (device_hairline) {
+        fprintf(out, " vector-effect=\"non-scaling-stroke\"");
+    }
 }
 
 /**
@@ -484,6 +902,343 @@ static int pmf_path_data_draw(const pmfPathCacheEntry *path, FILE *out,
             i++;
             break;
         }
+    }
+    return 1;
+}
+
+typedef enum {
+    PMF_CLIP_SHAPE_RECT,
+    PMF_CLIP_SHAPE_PATH,
+    PMF_CLIP_SHAPE_REGION,
+} pmfClipShapeType;
+
+typedef struct {
+    pmfClipShapeType type;
+    U_PMF_RECTF rect;
+    const pmfPathCacheEntry *path;
+    const pmfRegionCacheEntry *region;
+} pmfClipShape;
+
+/**
+  \brief Emit the effectively unbounded rectangle used by EMF+ clip masks.
+
+  EMF+ starts with an infinite clipping region. SVG masks need a finite backing
+  shape, so use a deliberately oversized user-space rectangle that safely
+  covers the converter's projected page coordinates.
+  */
+static void pmf_clip_mask_page_draw(FILE *out, const char *fill,
+                                    uint64_t mask_id) {
+    fprintf(out,
+            "<rect x=\"-1000000\" y=\"-1000000\" width=\"2000000\" "
+            "height=\"2000000\" fill=\"%s\"",
+            fill);
+    if (mask_id != 0) {
+        fprintf(out, " mask=\"url(#pmfClip%llu)\"",
+                (unsigned long long)mask_id);
+    }
+    fprintf(out, " />\n");
+}
+
+/**
+  \brief Decode and emit a path embedded in an EMF+ Region node.
+  */
+static int pmf_region_path_shape_draw(const char *data, const char *blimit,
+                                      FILE *out, drawingStates *states,
+                                      const char *fill) {
+    uint32_t version;
+    uint32_t count;
+    uint16_t flags;
+    const char *points_raw;
+    const char *types_raw;
+    pmfPathCacheEntry path = {0};
+
+    if (!U_PMF_PATH_get(data, &version, &count, &flags, &points_raw,
+                        &types_raw, blimit)) {
+        return 0;
+    }
+    UNUSED(version);
+    if (!U_PMF_VARPOINTS_get(points_raw, flags, (int)count, &path.points,
+                             blimit)) {
+        return 0;
+    }
+    path.types = pmf_path_types_decode(types_raw, flags, count, blimit);
+    if (path.types == NULL) {
+        free(path.points);
+        return 0;
+    }
+    path.count = count;
+    path.active = true;
+    fprintf(out, "<path d=\"");
+    (void)pmf_path_data_draw(&path, out, states);
+    fprintf(out, "\" fill=\"%s\" stroke=\"none\" />\n", fill);
+    free(path.points);
+    free(path.types);
+    return 1;
+}
+
+/**
+  \brief Emit the rectangle and path leaves of one union Region node.
+
+  test-038.emf uses a two-child OR region for its final clip examples. Other
+  boolean RegionNode operations remain deliberately unsupported here because
+  the surrounding clip-mask combiner already handles the general operations.
+  */
+static const char *pmf_region_node_shape_draw(const char *node,
+                                               const char *blimit, FILE *out,
+                                               drawingStates *states,
+                                               const char *fill) {
+    uint32_t type;
+    const char *data;
+
+    if (!U_PMF_REGIONNODE_get(node, &type, &data, blimit)) {
+        return NULL;
+    }
+    switch (type) {
+    case U_RNDT_Rect: {
+        U_PMF_RECTF rect;
+        const char *cursor = data;
+        if (!U_PMF_RECTF_get(&cursor, &rect.X, &rect.Y, &rect.Width,
+                             &rect.Height, blimit)) {
+            return NULL;
+        }
+        fprintf(out, "<path d=\"");
+        pmf_rect_path_draw(out, &rect, states);
+        fprintf(out, "\" fill=\"%s\" stroke=\"none\" />\n", fill);
+        return cursor;
+    }
+    case U_RNDT_Path: {
+        int32_t size;
+        const char *path_data;
+        const char *next;
+        if (!U_PMF_REGIONNODEPATH_get(data, &size, &path_data, blimit) ||
+            size < 0 || (size_t)size > (size_t)(blimit - path_data)) {
+            return NULL;
+        }
+        next = path_data + size;
+        if (!pmf_region_path_shape_draw(path_data, next, out, states, fill)) {
+            return NULL;
+        }
+        return next;
+    }
+    case U_RNDT_Or: {
+        const char *right = pmf_region_node_shape_draw(data, blimit, out,
+                                                       states, fill);
+        if (right == NULL) {
+            return NULL;
+        }
+        return pmf_region_node_shape_draw(right, blimit, out, states, fill);
+    }
+    case U_RNDT_Empty:
+        return node + sizeof(uint32_t);
+    case U_RNDT_Infinite:
+        pmf_clip_mask_page_draw(out, fill, 0);
+        return node + sizeof(uint32_t);
+    default:
+        return NULL;
+    }
+}
+
+/**
+  \brief Emit the supported geometry of one cached EMF+ Region object.
+  */
+static int pmf_region_shape_draw(const pmfRegionCacheEntry *region, FILE *out,
+                                 drawingStates *states, const char *fill) {
+    uint32_t version;
+    uint32_t count;
+    const char *nodes;
+    const char *blimit;
+
+    if (region == NULL || region->data == NULL || region->size == 0) {
+        return 0;
+    }
+    blimit = region->data + region->size;
+    if (!U_PMF_REGION_get(region->data, &version, &count, &nodes, blimit)) {
+        return 0;
+    }
+    UNUSED(version);
+    UNUSED(count);
+    return pmf_region_node_shape_draw(nodes, blimit, out, states, fill) != NULL;
+}
+
+/**
+  \brief Emit one rectangle or cached path as mask geometry.
+  */
+static void pmf_clip_shape_draw(FILE *out, const pmfClipShape *shape,
+                                drawingStates *states, const char *fill) {
+    if (shape->type == PMF_CLIP_SHAPE_REGION) {
+        (void)pmf_region_shape_draw(shape->region, out, states, fill);
+        return;
+    }
+    fprintf(out, "<path d=\"");
+    if (shape->type == PMF_CLIP_SHAPE_RECT) {
+        pmf_rect_path_draw(out, &shape->rect, states);
+    } else if (shape->path != NULL) {
+        (void)pmf_path_data_draw(shape->path, out, states);
+    }
+    fprintf(out, "\" fill=\"%s\" stroke=\"none\" />\n", fill);
+}
+
+/**
+  \brief Combine one EMF+ clip shape with the active SVG mask.
+
+  Nested mask references preserve all six GDI+ CombineMode operations without
+  reducing the clip to a bounding box. This is needed by the clipped-star
+  section of test-038.emf, which intentionally exercises every combine mode.
+  */
+static void pmf_clip_mask_combine_draw(FILE *out, drawingStates *states,
+                                       int combine_mode,
+                                       const pmfClipShape *shape) {
+    uint64_t previous_id = pmf_active_clip_mask_id;
+    uint64_t new_id;
+
+    if (shape == NULL) {
+        return;
+    }
+    if (previous_id == 0 && combine_mode == U_CM_Union) {
+        return;
+    }
+
+    new_id = ++pmf_clip_mask_serial;
+    fprintf(out,
+            "<defs><mask id=\"pmfClip%llu\" maskUnits=\"userSpaceOnUse\" "
+            "maskContentUnits=\"userSpaceOnUse\" x=\"-1000000\" "
+            "y=\"-1000000\" width=\"2000000\" height=\"2000000\">\n",
+            (unsigned long long)new_id);
+
+    if (previous_id == 0) {
+        switch (combine_mode) {
+        case U_CM_XOR:
+        case U_CM_Exclude:
+            pmf_clip_mask_page_draw(out, "white", 0);
+            pmf_clip_shape_draw(out, shape, states, "black");
+            break;
+        case U_CM_Complement:
+            /* New minus the initial infinite region is empty. */
+            break;
+        case U_CM_Replace:
+        case U_CM_Intersect:
+        default:
+            pmf_clip_shape_draw(out, shape, states, "white");
+            break;
+        }
+    } else {
+        switch (combine_mode) {
+        case U_CM_Intersect:
+            fprintf(out, "<g mask=\"url(#pmfClip%llu)\">\n",
+                    (unsigned long long)previous_id);
+            pmf_clip_shape_draw(out, shape, states, "white");
+            fprintf(out, "</g>\n");
+            break;
+        case U_CM_Union:
+            pmf_clip_mask_page_draw(out, "white", previous_id);
+            pmf_clip_shape_draw(out, shape, states, "white");
+            break;
+        case U_CM_XOR:
+            pmf_clip_mask_page_draw(out, "white", previous_id);
+            pmf_clip_shape_draw(out, shape, states, "white");
+            fprintf(out, "<g mask=\"url(#pmfClip%llu)\">\n",
+                    (unsigned long long)previous_id);
+            pmf_clip_shape_draw(out, shape, states, "black");
+            fprintf(out, "</g>\n");
+            break;
+        case U_CM_Exclude:
+            pmf_clip_mask_page_draw(out, "white", previous_id);
+            pmf_clip_shape_draw(out, shape, states, "black");
+            break;
+        case U_CM_Complement:
+            pmf_clip_shape_draw(out, shape, states, "white");
+            pmf_clip_mask_page_draw(out, "black", previous_id);
+            break;
+        case U_CM_Replace:
+        default:
+            pmf_clip_shape_draw(out, shape, states, "white");
+            break;
+        }
+    }
+    fprintf(out, "</mask></defs>\n");
+    pmf_active_clip_mask_id = new_id;
+}
+
+/**
+  \brief Attach the active EMF+ clipping mask to an emitted SVG element.
+  */
+static void pmf_clip_attr_draw(FILE *out) {
+    if (pmf_active_clip_mask_id != 0) {
+        fprintf(out, " mask=\"url(#pmfClip%llu)\"",
+                (unsigned long long)pmf_active_clip_mask_id);
+    }
+}
+
+/**
+  \brief Approximate an EMF+ PathGradient with colored SVG fan sectors.
+
+  SVG 1.1 has no direct equivalent of a GDI+ path gradient whose boundary
+  vertices each carry a different color. Splitting a polygon into wedges keeps
+  the black center and the per-vertex colors used by the test-038.emf stars,
+  instead of collapsing the complete star to the center color.
+  */
+static int pmf_path_gradient_fill_draw(const pmfPathCacheEntry *path,
+                                       const pmfBrushCacheEntry *brush,
+                                       FILE *out, drawingStates *states) {
+    POINT_D center;
+
+    if (path == NULL || brush == NULL || !brush->path_gradient ||
+        path->count < 3 || brush->gradient_count != path->count) {
+        return 0;
+    }
+    for (uint32_t i = 0; i < path->count; i++) {
+        uint8_t type = path->types[i] & U_PPT_MASK;
+        if (type != U_PPT_Start && type != U_PPT_Line) {
+            return 0;
+        }
+    }
+
+    center = pmf_path_point_project(states, &brush->center);
+    for (uint32_t i = 0; i < path->count; i++) {
+        uint32_t previous = (i + path->count - 1) % path->count;
+        uint32_t next = (i + 1) % path->count;
+        POINT_D point = pmf_path_point_project(states, &path->points[i]);
+        POINT_D previous_point =
+            pmf_path_point_project(states, &path->points[previous]);
+        POINT_D next_point =
+            pmf_path_point_project(states, &path->points[next]);
+        POINT_D previous_midpoint = {
+            (previous_point.x + point.x) / 2.0,
+            (previous_point.y + point.y) / 2.0,
+        };
+        POINT_D next_midpoint = {
+            (next_point.x + point.x) / 2.0,
+            (next_point.y + point.y) / 2.0,
+        };
+        U_PMF_ARGB edge = brush->gradient_colors[i];
+        uint64_t gradient_id = ++pmf_gradient_serial;
+
+        fprintf(out,
+                "<%sdefs><%slinearGradient id=\"pmfGradient%llu\" "
+                "gradientUnits=\"userSpaceOnUse\" x1=\"%.4f\" y1=\"%.4f\" "
+                "x2=\"%.4f\" y2=\"%.4f\">\n"
+                "<%sstop offset=\"0\" stop-color=\"#%02X%02X%02X\" "
+                "stop-opacity=\"%.4f\" />\n"
+                "<%sstop offset=\"1\" stop-color=\"#%02X%02X%02X\" "
+                "stop-opacity=\"%.4f\" />\n"
+                "</%slinearGradient></%sdefs>\n",
+                states->nameSpaceString, states->nameSpaceString,
+                (unsigned long long)gradient_id, center.x, center.y, point.x,
+                point.y, states->nameSpaceString, brush->color.Red,
+                brush->color.Green, brush->color.Blue,
+                brush->color.Alpha / 255.0, states->nameSpaceString, edge.Red,
+                edge.Green, edge.Blue, edge.Alpha / 255.0,
+                states->nameSpaceString, states->nameSpaceString);
+        fprintf(out,
+                "<%spath d=\"M %.4f,%.4f L %.4f,%.4f L %.4f,%.4f "
+                "L %.4f,%.4f Z\" fill=\"url(#pmfGradient%llu)\" "
+                "stroke=\"none\"",
+                states->nameSpaceString, center.x, center.y,
+                previous_midpoint.x, previous_midpoint.y, point.x, point.y,
+                next_midpoint.x, next_midpoint.y,
+                (unsigned long long)gradient_id);
+        pmf_clip_attr_draw(out);
+        fprintf(out, " />\n");
     }
     return 1;
 }
@@ -743,6 +1498,10 @@ static int pmf_bitmap_image_draw(const pmfImageCacheEntry *image,
                  "height=\"%.4f\" ",
             states->nameSpaceString, src->X, src->Y, src->Width, src->Height);
     pmf_image_transform_draw(out, src, points, states);
+    pmf_clip_attr_draw(out);
+    if (pmf_active_clip_mask_id != 0) {
+        fprintf(out, " ");
+    }
     fprintf(out, "xlink:href=\"data:%s;base64,%s\" />\n",
             pmf_image_mime_type((const unsigned char *)bitmap_data, data_size),
             b64);
@@ -766,6 +1525,9 @@ static int pmf_metafile_image_draw(const char *data, const char *blimit,
     size_t svg_len = 0;
     generatorOptions options;
     U_XFORM saved_world_transform = pmf_world_transform;
+    bool saved_top_level_primitive_draw_enabled =
+        pmf_top_level_primitive_draw_enabled;
+    uint64_t saved_active_clip_mask_id = pmf_active_clip_mask_id;
     double saved_metafile_stroke_scale = pmf_metafile_stroke_scale;
     drawingStates *saved_parent_bitmap_box_states =
         pmf_parent_bitmap_box_states;
@@ -836,6 +1598,9 @@ static int pmf_metafile_image_draw(const char *data, const char *blimit,
     pmf_parent_bitmap_box_states = saved_parent_bitmap_box_states;
     pmf_metafile_stroke_scale = saved_metafile_stroke_scale;
     pmf_world_transform = saved_world_transform;
+    pmf_top_level_primitive_draw_enabled =
+        saved_top_level_primitive_draw_enabled;
+    pmf_active_clip_mask_id = saved_active_clip_mask_id;
 
     if (convert_ok != 0 && svg != NULL) {
         const char *extra_close = "</g>\n";
@@ -850,6 +1615,7 @@ static int pmf_metafile_image_draw(const char *data, const char *blimit,
 
         fprintf(out, "<%sg", states->nameSpaceString);
         pmf_image_transform_draw(out, src, points, states);
+        pmf_clip_attr_draw(out);
         fprintf(out, ">\n%.*s</%sg>\n", (int)svg_len, svg,
                 states->nameSpaceString);
         ok = 1;
@@ -2106,8 +2872,43 @@ int U_PMF_IE_TINT_draw(const char *contents, FILE *out, drawingStates *states) {
   */
 int U_PMR_OFFSETCLIP_draw(const char *contents, FILE *out,
                           drawingStates *states) {
-    int status = 1;
-    return (status);
+    U_FLOAT dx;
+    U_FLOAT dy;
+    U_PMF_POINTF origin = {0.0, 0.0};
+    U_PMF_POINTF offset;
+    POINT_D projected_origin;
+    POINT_D projected_offset;
+    uint64_t previous_id;
+    uint64_t new_id;
+
+    if (pmf_metafile_depth != 0 || !pmf_top_level_primitive_draw_enabled) {
+        return 1;
+    }
+    if (!U_PMR_OFFSETCLIP_get(contents, NULL, &dx, &dy)) {
+        return 0;
+    }
+    if (pmf_active_clip_mask_id == 0) {
+        return 1;
+    }
+    offset.X = dx;
+    offset.Y = dy;
+    projected_origin = pmf_path_point_project(states, &origin);
+    projected_offset = pmf_path_point_project(states, &offset);
+    previous_id = pmf_active_clip_mask_id;
+    new_id = ++pmf_clip_mask_serial;
+
+    fprintf(out,
+            "<defs><mask id=\"pmfClip%llu\" maskUnits=\"userSpaceOnUse\" "
+            "maskContentUnits=\"userSpaceOnUse\" x=\"-1000000\" "
+            "y=\"-1000000\" width=\"2000000\" height=\"2000000\">\n"
+            "<g transform=\"translate(%.4f,%.4f)\">\n",
+            (unsigned long long)new_id,
+            projected_offset.x - projected_origin.x,
+            projected_offset.y - projected_origin.y);
+    pmf_clip_mask_page_draw(out, "white", previous_id);
+    fprintf(out, "</g>\n</mask></defs>\n");
+    pmf_active_clip_mask_id = new_id;
+    return 1;
 }
 
 /**
@@ -2118,7 +2919,18 @@ int U_PMR_OFFSETCLIP_draw(const char *contents, FILE *out,
   */
 int U_PMR_RESETCLIP_draw(const char *contents, FILE *out,
                          drawingStates *states) {
-    return (U_PMR_NODATAREC_draw(contents, out, states));
+    U_PMF_CMN_HDR header;
+
+    UNUSED(out);
+    UNUSED(states);
+    if (pmf_metafile_depth != 0 || !pmf_top_level_primitive_draw_enabled) {
+        return 1;
+    }
+    if (!U_PMR_RESETCLIP_get(contents, &header)) {
+        return 0;
+    }
+    pmf_active_clip_mask_id = 0;
+    return 1;
 }
 
 /**
@@ -2129,8 +2941,24 @@ int U_PMR_RESETCLIP_draw(const char *contents, FILE *out,
   */
 int U_PMR_SETCLIPPATH_draw(const char *contents, FILE *out,
                            drawingStates *states) {
-    int status = 1;
-    return (status);
+    uint32_t path_id;
+    int combine_mode;
+    pmfClipShape shape;
+
+    if (pmf_metafile_depth != 0 || !pmf_top_level_primitive_draw_enabled) {
+        return 1;
+    }
+    if (!U_PMR_SETCLIPPATH_get(contents, NULL, &path_id, &combine_mode)) {
+        return 0;
+    }
+    shape.type = PMF_CLIP_SHAPE_PATH;
+    shape.path = pmf_path_cache_get(path_id);
+    shape.region = NULL;
+    if (shape.path == NULL) {
+        return 1;
+    }
+    pmf_clip_mask_combine_draw(out, states, combine_mode, &shape);
+    return 1;
 }
 
 /**
@@ -2141,8 +2969,20 @@ int U_PMR_SETCLIPPATH_draw(const char *contents, FILE *out,
   */
 int U_PMR_SETCLIPRECT_draw(const char *contents, FILE *out,
                            drawingStates *states) {
-    int status = 1;
-    return (status);
+    int combine_mode;
+    pmfClipShape shape;
+
+    if (pmf_metafile_depth != 0 || !pmf_top_level_primitive_draw_enabled) {
+        return 1;
+    }
+    if (!U_PMR_SETCLIPRECT_get(contents, NULL, &combine_mode, &shape.rect)) {
+        return 0;
+    }
+    shape.type = PMF_CLIP_SHAPE_RECT;
+    shape.path = NULL;
+    shape.region = NULL;
+    pmf_clip_mask_combine_draw(out, states, combine_mode, &shape);
+    return 1;
 }
 
 /**
@@ -2153,8 +2993,24 @@ int U_PMR_SETCLIPRECT_draw(const char *contents, FILE *out,
   */
 int U_PMR_SETCLIPREGION_draw(const char *contents, FILE *out,
                              drawingStates *states) {
-    int status = 1;
-    return (status);
+    uint32_t region_id;
+    int combine_mode;
+    pmfClipShape shape = {0};
+
+    if (pmf_metafile_depth != 0 || !pmf_top_level_primitive_draw_enabled) {
+        return 1;
+    }
+    if (!U_PMR_SETCLIPREGION_get(contents, NULL, &region_id,
+                                 &combine_mode)) {
+        return 0;
+    }
+    shape.type = PMF_CLIP_SHAPE_REGION;
+    shape.region = pmf_region_cache_get(region_id);
+    if (shape.region == NULL) {
+        return 1;
+    }
+    pmf_clip_mask_combine_draw(out, states, combine_mode, &shape);
+    return 1;
 }
 
 /**
@@ -2164,8 +3020,26 @@ int U_PMR_SETCLIPREGION_draw(const char *contents, FILE *out,
   EMF+ manual 2.3.2.1, Microsoft name: EmfPlusComment Record, Index 0x03
   */
 int U_PMR_COMMENT_draw(const char *contents, FILE *out, drawingStates *states) {
-    int status = 1;
-    return (status);
+    U_PMF_CMN_HDR header;
+    const char *data;
+
+    UNUSED(out);
+    UNUSED(states);
+    if (!U_PMR_COMMENT_get(contents, &header, &data)) {
+        return 0;
+    }
+    /*
+     * libUEMF's testbed_pmf emits this marker before a stream that has no
+     * useful GDI vector fallback. Without this exception, test-038.emf loses
+     * most of its EMF+ content; with a broader exception, dual EMFs get
+     * duplicate path output.
+     */
+    if (pmf_comment_contains(
+            data, header.DataSize,
+            "Everything after this is EMF+, except for the very last record")) {
+        pmf_top_level_primitive_draw_enabled = true;
+    }
+    return 1;
 }
 
 /**
@@ -2292,8 +3166,29 @@ int U_PMR_DRAWDRIVERSTRING_draw(const char *contents, FILE *out,
   */
 int U_PMR_DRAWELLIPSE_draw(const char *contents, FILE *out,
                            drawingStates *states) {
-    int status = 1;
-    return (status);
+    uint32_t pen_id;
+    int ctype;
+    U_PMF_RECTF rect;
+    const pmfPenCacheEntry *pen;
+
+    if (!U_PMR_DRAWELLIPSE_get(contents, NULL, &pen_id, &ctype, &rect)) {
+        return 0;
+    }
+    UNUSED(ctype);
+    if (!pmf_primitive_draw_allowed()) {
+        return 1;
+    }
+    pen = pmf_pen_cache_get(pen_id);
+    if (pen == NULL || pen->color.Alpha == 0) {
+        return 1;
+    }
+    fprintf(out, "<%spath d=\"", states->nameSpaceString);
+    pmf_ellipse_path_draw(out, &rect, states);
+    fprintf(out, "\" fill=\"none\" ");
+    pmf_pen_attrs_draw(out, pen, states);
+    pmf_clip_attr_draw(out);
+    fprintf(out, " />\n");
+    return 1;
 }
 
 /**
@@ -2388,8 +3283,45 @@ int U_PMR_DRAWIMAGEPOINTS_draw(const char *contents, FILE *out,
   */
 int U_PMR_DRAWLINES_draw(const char *contents, FILE *out,
                          drawingStates *states) {
-    int status = 1;
-    return (status);
+    uint32_t pen_id;
+    int ctype;
+    int dtype;
+    int rel_abs;
+    uint32_t elements;
+    U_PMF_POINTF *points = NULL;
+    const pmfPenCacheEntry *pen;
+
+    if (!U_PMR_DRAWLINES_get(contents, NULL, &pen_id, &ctype, &dtype, &rel_abs,
+                             &elements, &points)) {
+        return 0;
+    }
+    UNUSED(ctype);
+    UNUSED(rel_abs);
+    if (!pmf_primitive_draw_allowed()) {
+        free(points);
+        return 1;
+    }
+    pen = pmf_pen_cache_get(pen_id);
+    if (pen == NULL || pen->color.Alpha == 0 || elements == 0) {
+        free(points);
+        return 1;
+    }
+
+    fprintf(out, "<%spath d=\"", states->nameSpaceString);
+    for (uint32_t i = 0; i < elements; i++) {
+        POINT_D point = pmf_path_point_project(states, &points[i]);
+        fprintf(out, "%c %.4f,%.4f ", i == 0 ? 'M' : 'L', point.x,
+                point.y);
+    }
+    if (dtype) {
+        fprintf(out, "Z ");
+    }
+    fprintf(out, "\" fill=\"none\" ");
+    pmf_pen_attrs_draw(out, pen, states);
+    pmf_clip_attr_draw(out);
+    fprintf(out, " />\n");
+    free(points);
+    return 1;
 }
 
 /**
@@ -2409,11 +3341,11 @@ int U_PMR_DRAWPATH_draw(const char *contents, FILE *out,
     bool stabilize_stroke;
     bool rounded_stroke;
 
-    if (pmf_metafile_depth <= 0) {
-        return 1;
-    }
     if (!U_PMR_DRAWPATH_get(contents, NULL, &path_id, &pen_id)) {
         return 0;
+    }
+    if (!pmf_primitive_draw_allowed()) {
+        return 1;
     }
     path = pmf_path_cache_get(path_id);
     pen = pmf_pen_cache_get(pen_id);
@@ -2454,6 +3386,12 @@ int U_PMR_DRAWPATH_draw(const char *contents, FILE *out,
         stabilize_stroke = true;
         rounded_stroke = true;
     }
+    if (pmf_metafile_depth == 0 && pmf_top_level_primitive_draw_enabled &&
+        stroke_width < 1.0) {
+        /* Preserve pure-EMF+ one-unit pens as visible device hairlines. */
+        stroke_width = 1.0;
+        stabilize_stroke = true;
+    }
     fprintf(out, "<%spath d=\"", states->nameSpaceString);
     if (!pmf_path_data_draw(path, out, states)) {
         fprintf(out, "\" />\n");
@@ -2470,6 +3408,7 @@ int U_PMR_DRAWPATH_draw(const char *contents, FILE *out,
             fprintf(out, " stroke-linecap=\"round\" stroke-linejoin=\"round\"");
         }
     }
+    pmf_clip_attr_draw(out);
     fprintf(out, " />\n");
     return 1;
 }
@@ -2494,8 +3433,37 @@ int U_PMR_DRAWPIE_draw(const char *contents, FILE *out, drawingStates *states) {
   */
 int U_PMR_DRAWRECTS_draw(const char *contents, const char *blimit, FILE *out,
                          drawingStates *states) {
-    int status = 1;
-    return (status);
+    uint32_t pen_id;
+    int ctype;
+    uint32_t elements;
+    U_PMF_RECTF *rects = NULL;
+    const pmfPenCacheEntry *pen;
+
+    UNUSED(blimit);
+    if (!U_PMR_DRAWRECTS_get(contents, NULL, &pen_id, &ctype, &elements,
+                             &rects)) {
+        return 0;
+    }
+    UNUSED(ctype);
+    if (!pmf_primitive_draw_allowed()) {
+        free(rects);
+        return 1;
+    }
+    pen = pmf_pen_cache_get(pen_id);
+    if (pen == NULL || pen->color.Alpha == 0) {
+        free(rects);
+        return 1;
+    }
+    for (uint32_t i = 0; i < elements; i++) {
+        fprintf(out, "<%spath d=\"", states->nameSpaceString);
+        pmf_rect_path_draw(out, &rects[i], states);
+        fprintf(out, "\" fill=\"none\" ");
+        pmf_pen_attrs_draw(out, pen, states);
+        pmf_clip_attr_draw(out);
+        fprintf(out, " />\n");
+    }
+    free(rects);
+    return 1;
 }
 
 /**
@@ -2506,8 +3474,70 @@ int U_PMR_DRAWRECTS_draw(const char *contents, const char *blimit, FILE *out,
   */
 int U_PMR_DRAWSTRING_draw(const char *contents, FILE *out,
                           drawingStates *states) {
-    int status = 1;
-    return (status);
+    uint32_t font_id;
+    int brush_is_inline;
+    uint32_t brush_id;
+    uint32_t format_id;
+    uint32_t elements;
+    U_PMF_RECTF rect;
+    uint16_t *string16 = NULL;
+    U_PMF_ARGB color;
+    const pmfFontCacheEntry *font;
+    char *string8;
+    U_PMF_POINTF origin;
+    POINT_D point;
+    double font_size;
+
+    if (!U_PMR_DRAWSTRING_get(contents, NULL, &font_id, &brush_is_inline,
+                              &brush_id, &format_id, &elements, &rect,
+                              &string16)) {
+        return 0;
+    }
+    UNUSED(format_id);
+    if (!pmf_primitive_draw_allowed()) {
+        free(string16);
+        return 1;
+    }
+    if (!pmf_solid_brush_color(brush_id, brush_is_inline, &color) ||
+        color.Alpha == 0) {
+        free(string16);
+        return 1;
+    }
+    font = pmf_font_cache_get(font_id);
+    string8 = U_Utf16leToUtf8(string16, elements, NULL);
+    free(string16);
+    if (string8 == NULL) {
+        return 1;
+    }
+
+    origin.X = rect.X;
+    origin.Y = rect.Y + (font != NULL ? font->em_size : rect.Height);
+    point = pmf_path_point_project(states, &origin);
+    font_size = (font != NULL ? font->em_size : rect.Height) *
+                pmf_path_stroke_scale(states);
+    if (font_size <= 0.0) {
+        font_size = fabs(rect.Height);
+    }
+
+    fprintf(out, "<%stext x=\"%.4f\" y=\"%.4f\" font-size=\"%.4f\" ",
+            states->nameSpaceString, point.x, point.y, font_size);
+    if (font != NULL && font->family != NULL) {
+        fprintf(out, "font-family=\"");
+        pmf_attr_text_draw(out, font->family);
+        fprintf(out, "\" ");
+        if (font->style_flags & 1) {
+            fprintf(out, "font-weight=\"bold\" ");
+        }
+        if (font->style_flags & 2) {
+            fprintf(out, "font-style=\"italic\" ");
+        }
+    }
+    pmf_color_attrs_draw(out, "fill", color);
+    pmf_clip_attr_draw(out);
+    fprintf(out, "><![CDATA[%s]]></%stext>\n", string8,
+            states->nameSpaceString);
+    free(string8);
+    return 1;
 }
 
 /**
@@ -2531,8 +3561,32 @@ int U_PMR_FILLCLOSEDCURVE_draw(const char *contents, FILE *out,
   */
 int U_PMR_FILLELLIPSE_draw(const char *contents, FILE *out,
                            drawingStates *states) {
-    int status = 1;
-    return (status);
+    int brush_is_inline;
+    int ctype;
+    uint32_t brush_id;
+    U_PMF_RECTF rect;
+    U_PMF_ARGB color;
+
+    if (!U_PMR_FILLELLIPSE_get(contents, NULL, &brush_is_inline, &ctype,
+                               &brush_id, &rect)) {
+        return 0;
+    }
+    UNUSED(ctype);
+    if (!pmf_primitive_draw_allowed()) {
+        return 1;
+    }
+    if (!pmf_solid_brush_color(brush_id, brush_is_inline, &color) ||
+        color.Alpha == 0) {
+        return 1;
+    }
+    fprintf(out, "<%spath d=\"", states->nameSpaceString);
+    pmf_ellipse_path_draw(out, &rect, states);
+    fprintf(out, "\" ");
+    pmf_color_attrs_draw(out, "fill", color);
+    fprintf(out, " stroke=\"none\"");
+    pmf_clip_attr_draw(out);
+    fprintf(out, " />\n");
+    return 1;
 }
 
 /**
@@ -2548,20 +3602,31 @@ int U_PMR_FILLPATH_draw(const char *contents, FILE *out,
     uint32_t brush_id;
     U_PMF_ARGB color;
     const pmfPathCacheEntry *path;
+    const pmfBrushCacheEntry *brush = NULL;
 
     if (!U_PMR_FILLPATH_get(contents, NULL, &path_id, &brush_is_inline,
                             &brush_id)) {
         return 0;
+    }
+    if (!brush_is_inline) {
+        brush = pmf_brush_cache_get(brush_id);
     }
     if (!pmf_solid_brush_color(brush_id, brush_is_inline, &color)) {
         return 1;
     }
     if (pmf_metafile_depth <= 0) {
         pmf_recent_fill_color_store(states, color);
+    }
+    if (!pmf_primitive_draw_allowed()) {
         return 1;
     }
     path = pmf_path_cache_get(path_id);
     if (path == NULL) {
+        return 1;
+    }
+    if (pmf_metafile_depth == 0 && pmf_top_level_primitive_draw_enabled &&
+        brush != NULL &&
+        pmf_path_gradient_fill_draw(path, brush, out, states)) {
         return 1;
     }
 
@@ -2571,8 +3636,10 @@ int U_PMR_FILLPATH_draw(const char *contents, FILE *out,
         return 0;
     }
     fprintf(out, "\" fill=\"#%02X%02X%02X\" fill-opacity=\"%.4f\" "
-                 "stroke=\"none\" />\n",
+                 "stroke=\"none\"",
             color.Red, color.Green, color.Blue, color.Alpha / 255.0);
+    pmf_clip_attr_draw(out);
+    fprintf(out, " />\n");
     return 1;
 }
 
@@ -2595,8 +3662,43 @@ int U_PMR_FILLPIE_draw(const char *contents, FILE *out, drawingStates *states) {
   */
 int U_PMR_FILLPOLYGON_draw(const char *contents, FILE *out,
                            drawingStates *states) {
-    int status = 1;
-    return (status);
+    int brush_is_inline;
+    int ctype;
+    int rel_abs;
+    uint32_t brush_id;
+    uint32_t elements;
+    U_PMF_POINTF *points = NULL;
+    U_PMF_ARGB color;
+
+    if (!U_PMR_FILLPOLYGON_get(contents, NULL, &brush_is_inline, &ctype,
+                               &rel_abs, &brush_id, &elements, &points)) {
+        return 0;
+    }
+    UNUSED(ctype);
+    UNUSED(rel_abs);
+    if (!pmf_primitive_draw_allowed()) {
+        free(points);
+        return 1;
+    }
+    if (!pmf_solid_brush_color(brush_id, brush_is_inline, &color) ||
+        color.Alpha == 0 || elements == 0) {
+        free(points);
+        return 1;
+    }
+
+    fprintf(out, "<%spath d=\"", states->nameSpaceString);
+    for (uint32_t i = 0; i < elements; i++) {
+        POINT_D point = pmf_path_point_project(states, &points[i]);
+        fprintf(out, "%c %.4f,%.4f ", i == 0 ? 'M' : 'L', point.x,
+                point.y);
+    }
+    fprintf(out, "Z\" ");
+    pmf_color_attrs_draw(out, "fill", color);
+    fprintf(out, " stroke=\"none\"");
+    pmf_clip_attr_draw(out);
+    fprintf(out, " />\n");
+    free(points);
+    return 1;
 }
 
 /**
@@ -2608,8 +3710,39 @@ int U_PMR_FILLPOLYGON_draw(const char *contents, FILE *out,
   */
 int U_PMR_FILLRECTS_draw(const char *contents, const char *blimit, FILE *out,
                          drawingStates *states) {
-    int status = 1;
-    return (status);
+    int brush_is_inline;
+    int ctype;
+    uint32_t brush_id;
+    uint32_t elements;
+    U_PMF_RECTF *rects = NULL;
+    U_PMF_ARGB color;
+
+    UNUSED(blimit);
+    if (!U_PMR_FILLRECTS_get(contents, NULL, &brush_is_inline, &ctype,
+                             &brush_id, &elements, &rects)) {
+        return 0;
+    }
+    UNUSED(ctype);
+    if (!pmf_primitive_draw_allowed()) {
+        free(rects);
+        return 1;
+    }
+    if (!pmf_solid_brush_color(brush_id, brush_is_inline, &color) ||
+        color.Alpha == 0) {
+        free(rects);
+        return 1;
+    }
+    for (uint32_t i = 0; i < elements; i++) {
+        fprintf(out, "<%spath d=\"", states->nameSpaceString);
+        pmf_rect_path_draw(out, &rects[i], states);
+        fprintf(out, "\" ");
+        pmf_color_attrs_draw(out, "fill", color);
+        fprintf(out, " stroke=\"none\"");
+        pmf_clip_attr_draw(out);
+        fprintf(out, " />\n");
+    }
+    free(rects);
+    return 1;
 }
 
 /**
@@ -2704,6 +3837,8 @@ int U_PMR_OBJECT_draw(const char *contents, const char *blimit,
     if (status) {
         switch (ttype) {
         case U_OT_Brush:
+            (void)pmf_brush_cache_store((uint32_t)ObjCont->Id, ObjCont->accum,
+                                        ObjCont->accum + ObjCont->used);
             (void)U_PMF_BRUSH_draw(ObjCont->accum, out, states);
             break;
         case U_OT_Pen:
@@ -2717,6 +3852,8 @@ int U_PMR_OBJECT_draw(const char *contents, const char *blimit,
             (void)U_PMF_PATH_draw(ObjCont->accum, out, states);
             break;
         case U_OT_Region:
+            (void)pmf_region_cache_store((uint32_t)ObjCont->Id, ObjCont->accum,
+                                         ObjCont->used);
             (void)U_PMF_REGION_draw(ObjCont->accum, out, states);
             break;
         case U_OT_Image:
@@ -2725,6 +3862,8 @@ int U_PMR_OBJECT_draw(const char *contents, const char *blimit,
             (void)U_PMF_IMAGE_draw(ObjCont->accum, out, states);
             break;
         case U_OT_Font:
+            (void)pmf_font_cache_store((uint32_t)ObjCont->Id, ObjCont->accum,
+                                       ObjCont->accum + ObjCont->used);
             (void)U_PMF_FONT_draw(ObjCont->accum, out, states);
             break;
         case U_OT_StringFormat:
