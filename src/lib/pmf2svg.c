@@ -61,6 +61,15 @@ typedef struct {
     bool active;
     U_PMF_ARGB color;
     U_FLOAT width;
+    U_FLOAT *dash_lengths;
+    int32_t dash_count;
+    U_FLOAT dash_offset;
+    U_FLOAT start_cap_inset;
+    U_FLOAT end_cap_inset;
+    U_FLOAT start_cap_width_scale;
+    U_FLOAT end_cap_width_scale;
+    bool custom_start_cap;
+    bool custom_end_cap;
 } pmfPenCacheEntry;
 
 typedef struct {
@@ -174,6 +183,16 @@ static void pmf_path_cache_clear(void) {
 static void pmf_pen_cache_clear(void) {
     for (size_t i = 0; i < sizeof(pmf_pen_cache) / sizeof(pmf_pen_cache[0]);
          i++) {
+        free(pmf_pen_cache[i].dash_lengths);
+        pmf_pen_cache[i].dash_lengths = NULL;
+        pmf_pen_cache[i].dash_count = 0;
+        pmf_pen_cache[i].dash_offset = 0.0;
+        pmf_pen_cache[i].start_cap_inset = 0.0;
+        pmf_pen_cache[i].end_cap_inset = 0.0;
+        pmf_pen_cache[i].start_cap_width_scale = 1.0;
+        pmf_pen_cache[i].end_cap_width_scale = 1.0;
+        pmf_pen_cache[i].custom_start_cap = false;
+        pmf_pen_cache[i].custom_end_cap = false;
         pmf_pen_cache[i].active = false;
         pmf_pen_cache[i].width = 0.0;
         memset(&pmf_pen_cache[i].color, 0, sizeof(pmf_pen_cache[i].color));
@@ -400,6 +419,58 @@ static int pmf_solid_brush_object_color(const char *brush, const char *blimit,
 }
 
 /**
+ * \brief Read the dimensions of one default EMF+ custom line cap.
+ *
+ * k-hop2.emf uses the default custom-cap payload for triangular arrowheads.
+ * Its fill path is more detail than the SVG fallback needs; the inset and
+ * width scale are sufficient to recreate the cap at a stroked path endpoint.
+ */
+static bool pmf_custom_cap_metrics(const char *contents, bool start_cap,
+                                   const char *blimit, U_FLOAT *inset,
+                                   U_FLOAT *width_scale) {
+    int32_t size;
+    const char *cap_contents;
+    const char *cap_data;
+    const char *optional_data;
+    const char *cap_limit;
+    uint32_t version;
+    uint32_t type;
+    U_PMF_CUSTOMLINECAPDATA cap;
+    int ok;
+
+    if (contents == NULL || inset == NULL || width_scale == NULL) {
+        return false;
+    }
+    if (start_cap) {
+        ok = U_PMF_CUSTOMSTARTCAPDATA_get(contents, &size, &cap_contents,
+                                           blimit);
+    } else {
+        ok = U_PMF_CUSTOMENDCAPDATA_get(contents, &size, &cap_contents,
+                                         blimit);
+    }
+    if (!ok || size <= 0 || cap_contents > blimit ||
+        (size_t)(blimit - cap_contents) < (size_t)size) {
+        return false;
+    }
+    cap_limit = cap_contents + size;
+    if (!U_PMF_CUSTOMLINECAP_get(cap_contents, &version, &type, &cap_data,
+                                 cap_limit) ||
+        type != U_CLCDT_Default ||
+        !U_PMF_CUSTOMLINECAPDATA_get(cap_data, &cap, &optional_data,
+                                     cap_limit)) {
+        return false;
+    }
+    UNUSED(version);
+    UNUSED(optional_data);
+    if (cap.Inset <= 0.0 || cap.WidthScale <= 0.0) {
+        return false;
+    }
+    *inset = cap.Inset;
+    *width_scale = cap.WidthScale;
+    return true;
+}
+
+/**
   \brief Store a completed EMF+ Pen object for later DrawPath records.
 
   The formula samples use solid pens for stroke-only operators. Caching the pen
@@ -418,6 +489,27 @@ static int pmf_pen_cache_store(uint32_t id, const char *data,
     const char *optional_data;
     U_PMF_ARGB color;
     pmfPenCacheEntry *entry;
+    U_PMF_TRANSFORMMATRIX matrix;
+    int32_t start_cap;
+    int32_t end_cap;
+    uint32_t join;
+    U_FLOAT miter_limit;
+    int32_t line_style;
+    int32_t dash_cap;
+    U_FLOAT dash_offset = 0.0;
+    const char *dash_data = NULL;
+    int32_t alignment;
+    const char *compound_line_data = NULL;
+    const char *custom_start_cap_data = NULL;
+    const char *custom_end_cap_data = NULL;
+    U_FLOAT *dash_lengths = NULL;
+    int32_t dash_count = 0;
+    U_FLOAT start_cap_inset = 0.0;
+    U_FLOAT end_cap_inset = 0.0;
+    U_FLOAT start_cap_width_scale = 1.0;
+    U_FLOAT end_cap_width_scale = 1.0;
+    bool custom_start_cap = false;
+    bool custom_end_cap = false;
 
     if (id >= sizeof(pmf_pen_cache) / sizeof(pmf_pen_cache[0]) ||
         data == NULL) {
@@ -433,13 +525,49 @@ static int pmf_pen_cache_store(uint32_t id, const char *data,
         !pmf_solid_brush_object_color(brush, blimit, &color)) {
         return 0;
     }
-    UNUSED(flags);
     UNUSED(unit);
-    UNUSED(optional_data);
+
+    if (flags != U_PD_None &&
+        U_PMF_PENOPTIONALDATA_get(
+            optional_data, flags, &matrix, &start_cap, &end_cap, &join,
+            &miter_limit, &line_style, &dash_cap, &dash_offset, &dash_data,
+            &alignment, &compound_line_data, &custom_start_cap_data,
+            &custom_end_cap_data, blimit)) {
+        if ((flags & U_PD_DLData) != 0 && dash_data != NULL &&
+            U_PMF_DASHEDLINEDATA_get(dash_data, &dash_count, &dash_lengths,
+                                     blimit) &&
+            (dash_count <= 0 || dash_count > 64)) {
+            free(dash_lengths);
+            dash_lengths = NULL;
+            dash_count = 0;
+        }
+        if ((flags & U_PD_CustomStartCap) != 0 &&
+            pmf_custom_cap_metrics(custom_start_cap_data, true, blimit,
+                                   &start_cap_inset,
+                                   &start_cap_width_scale)) {
+            custom_start_cap = true;
+        }
+        if ((flags & U_PD_CustomEndCap) != 0 &&
+            pmf_custom_cap_metrics(custom_end_cap_data, false, blimit,
+                                   &end_cap_inset, &end_cap_width_scale)) {
+            custom_end_cap = true;
+        }
+    }
 
     entry = &pmf_pen_cache[id];
+    free(entry->dash_lengths);
+    memset(entry, 0, sizeof(*entry));
     entry->color = color;
     entry->width = width;
+    entry->dash_lengths = dash_lengths;
+    entry->dash_count = dash_count;
+    entry->dash_offset = dash_offset;
+    entry->start_cap_inset = start_cap_inset;
+    entry->end_cap_inset = end_cap_inset;
+    entry->start_cap_width_scale = start_cap_width_scale;
+    entry->end_cap_width_scale = end_cap_width_scale;
+    entry->custom_start_cap = custom_start_cap;
+    entry->custom_end_cap = custom_end_cap;
     entry->active = true;
     return 1;
 }
@@ -830,6 +958,44 @@ static void pmf_ellipse_path_draw(FILE *out, const U_PMF_RECTF *rect,
 }
 
 /**
+  \brief Emit an EMF+ dash pattern scaled to the resolved SVG pen width.
+  */
+static void pmf_pen_dash_attrs_draw(FILE *out, const pmfPenCacheEntry *pen,
+                                    double stroke_width) {
+    if (pen->dash_count <= 0 || pen->dash_lengths == NULL ||
+        stroke_width <= 0.0) {
+        return;
+    }
+    for (int32_t i = 0; i < pen->dash_count; i++) {
+        if (pen->dash_lengths[i] <= 0.0) {
+            return;
+        }
+    }
+    fprintf(out, " stroke-dasharray=\"");
+    for (int32_t i = 0; i < pen->dash_count; i++) {
+        double dash_length = fabs((double)pen->dash_lengths[i]) * stroke_width;
+        fprintf(out, "%s%.4f", i == 0 ? "" : ",", dash_length);
+    }
+    fprintf(out, "\"");
+    if (pen->dash_offset != 0.0) {
+        /* SVG offsets move the first painted dash in the opposite direction. */
+        fprintf(out, " stroke-dashoffset=\"%.4f\"",
+                -(double)pen->dash_offset * stroke_width);
+    }
+}
+
+/**
+  \brief Return whether a dual EMF+/GDI path needs top-level compensation.
+
+  The GDI fallback for k-hop2.emf omits some dashed custom-cap paths. Other
+  top-level EMF+ primitives continue to rely solely on their GDI fallback.
+  */
+static bool pmf_pen_needs_top_level_compensation(const pmfPenCacheEntry *pen) {
+    return pen != NULL && pen->dash_count > 0 && pen->dash_lengths != NULL &&
+           (pen->custom_start_cap || pen->custom_end_cap);
+}
+
+/**
   \brief Emit stroke attributes for a cached EMF+ pen.
   */
 static void pmf_pen_attrs_draw(FILE *out, const pmfPenCacheEntry *pen,
@@ -1166,6 +1332,106 @@ static void pmf_clip_attr_draw(FILE *out) {
     if (pmf_active_clip_mask_id != 0) {
         fprintf(out, " mask=\"url(#pmfClip%llu)\"",
                 (unsigned long long)pmf_active_clip_mask_id);
+    }
+}
+
+/**
+  \brief Find the visible segment that anchors a custom cap at one path end.
+ */
+static bool pmf_path_cap_segment(const pmfPathCacheEntry *path,
+                                 drawingStates *states, bool start_cap,
+                                 POINT_D *tip, POINT_D *body) {
+    uint32_t tip_index;
+
+    if (path == NULL || !path->active || path->count < 2 || tip == NULL ||
+        body == NULL) {
+        return false;
+    }
+    tip_index = start_cap ? 0 : path->count - 1;
+    *tip = pmf_path_point_project(states, &path->points[tip_index]);
+    if (start_cap) {
+        for (uint32_t i = 1; i < path->count; i++) {
+            *body = pmf_path_point_project(states, &path->points[i]);
+            if (hypot(body->x - tip->x, body->y - tip->y) > 0.0) {
+                return true;
+            }
+        }
+    } else {
+        for (uint32_t i = path->count - 1; i-- > 0;) {
+            *body = pmf_path_point_project(states, &path->points[i]);
+            if (hypot(body->x - tip->x, body->y - tip->y) > 0.0) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+/**
+  \brief Emit one default EMF+ custom cap as a filled triangular arrowhead.
+
+  Default custom caps in k-hop2.emf carry a triangle fill path. The cap inset
+  measures the shaft overlap, so adding two thirds of a pen width reproduces
+  the four-pen-width arrowhead recorded by the GDI fallback.
+ */
+static void pmf_arrow_cap_draw(FILE *out, drawingStates *states,
+                               const pmfPenCacheEntry *pen, POINT_D tip,
+                               POINT_D body, double stroke_width,
+                               U_FLOAT inset, U_FLOAT width_scale) {
+    double dx = tip.x - body.x;
+    double dy = tip.y - body.y;
+    double direction_length = hypot(dx, dy);
+    double cap_length;
+    double cap_half_width;
+    POINT_D base;
+    POINT_D side_a;
+    POINT_D side_b;
+
+    if (direction_length <= 0.0 || stroke_width <= 0.0 || inset <= 0.0 ||
+        width_scale <= 0.0) {
+        return;
+    }
+    dx /= direction_length;
+    dy /= direction_length;
+    cap_length = ((double)inset + 2.0 / 3.0) * stroke_width * width_scale;
+    cap_half_width = cap_length / 2.0;
+    base.x = tip.x - dx * cap_length;
+    base.y = tip.y - dy * cap_length;
+    side_a.x = base.x - dy * cap_half_width;
+    side_a.y = base.y + dx * cap_half_width;
+    side_b.x = base.x + dy * cap_half_width;
+    side_b.y = base.y - dx * cap_half_width;
+
+    fprintf(out,
+            "<%spath d=\"M %.4f,%.4f L %.4f,%.4f L %.4f,%.4f Z\" ",
+            states->nameSpaceString, tip.x, tip.y, side_a.x, side_a.y,
+            side_b.x, side_b.y);
+    pmf_color_attrs_draw(out, "fill", pen->color);
+    fprintf(out, " stroke=\"none\"");
+    pmf_clip_attr_draw(out);
+    fprintf(out, " />\n");
+}
+
+/**
+  \brief Draw custom start and end caps for one compensated EMF+ path.
+ */
+static void pmf_path_custom_caps_draw(const pmfPathCacheEntry *path,
+                                      const pmfPenCacheEntry *pen,
+                                      FILE *out, drawingStates *states,
+                                      double stroke_width) {
+    POINT_D tip;
+    POINT_D body;
+
+    if (pen->custom_start_cap &&
+        pmf_path_cap_segment(path, states, true, &tip, &body)) {
+        pmf_arrow_cap_draw(out, states, pen, tip, body, stroke_width,
+                           pen->start_cap_inset,
+                           pen->start_cap_width_scale);
+    }
+    if (pen->custom_end_cap &&
+        pmf_path_cap_segment(path, states, false, &tip, &body)) {
+        pmf_arrow_cap_draw(out, states, pen, tip, body, stroke_width,
+                           pen->end_cap_inset, pen->end_cap_width_scale);
     }
 }
 
@@ -3290,6 +3556,7 @@ int U_PMR_DRAWLINES_draw(const char *contents, FILE *out,
     uint32_t elements;
     U_PMF_POINTF *points = NULL;
     const pmfPenCacheEntry *pen;
+    bool compensate;
 
     if (!U_PMR_DRAWLINES_get(contents, NULL, &pen_id, &ctype, &dtype, &rel_abs,
                              &elements, &points)) {
@@ -3297,12 +3564,14 @@ int U_PMR_DRAWLINES_draw(const char *contents, FILE *out,
     }
     UNUSED(ctype);
     UNUSED(rel_abs);
-    if (!pmf_primitive_draw_allowed()) {
+    pen = pmf_pen_cache_get(pen_id);
+    if (pen == NULL || pen->color.Alpha == 0 || elements == 0) {
         free(points);
         return 1;
     }
-    pen = pmf_pen_cache_get(pen_id);
-    if (pen == NULL || pen->color.Alpha == 0 || elements == 0) {
+    compensate = !pmf_primitive_draw_allowed() &&
+                 pmf_pen_needs_top_level_compensation(pen);
+    if (!pmf_primitive_draw_allowed() && !compensate) {
         free(points);
         return 1;
     }
@@ -3318,6 +3587,10 @@ int U_PMR_DRAWLINES_draw(const char *contents, FILE *out,
     }
     fprintf(out, "\" fill=\"none\" ");
     pmf_pen_attrs_draw(out, pen, states);
+    if (compensate) {
+        pmf_pen_dash_attrs_draw(
+            out, pen, fabs((double)pen->width) * pmf_path_stroke_scale(states));
+    }
     pmf_clip_attr_draw(out);
     fprintf(out, " />\n");
     free(points);
@@ -3340,12 +3613,10 @@ int U_PMR_DRAWPATH_draw(const char *contents, FILE *out,
     double raw_width;
     bool stabilize_stroke;
     bool rounded_stroke;
+    bool compensate;
 
     if (!U_PMR_DRAWPATH_get(contents, NULL, &path_id, &pen_id)) {
         return 0;
-    }
-    if (!pmf_primitive_draw_allowed()) {
-        return 1;
     }
     path = pmf_path_cache_get(path_id);
     pen = pmf_pen_cache_get(pen_id);
@@ -3353,6 +3624,11 @@ int U_PMR_DRAWPATH_draw(const char *contents, FILE *out,
         return 1;
     }
     if (pen->color.Alpha == 0) {
+        return 1;
+    }
+    compensate = !pmf_primitive_draw_allowed() &&
+                 pmf_pen_needs_top_level_compensation(pen);
+    if (!pmf_primitive_draw_allowed() && !compensate) {
         return 1;
     }
 
@@ -3402,6 +3678,9 @@ int U_PMR_DRAWPATH_draw(const char *contents, FILE *out,
             "stroke-opacity=\"%.4f\" stroke-width=\"%.4f\"",
             pen->color.Red, pen->color.Green, pen->color.Blue,
             pen->color.Alpha / 255.0, stroke_width);
+    if (compensate) {
+        pmf_pen_dash_attrs_draw(out, pen, stroke_width);
+    }
     if (stabilize_stroke) {
         fprintf(out, " vector-effect=\"non-scaling-stroke\"");
         if (rounded_stroke) {
@@ -3410,6 +3689,9 @@ int U_PMR_DRAWPATH_draw(const char *contents, FILE *out,
     }
     pmf_clip_attr_draw(out);
     fprintf(out, " />\n");
+    if (compensate) {
+        pmf_path_custom_caps_draw(path, pen, out, states, stroke_width);
+    }
     return 1;
 }
 
