@@ -1368,6 +1368,62 @@ static bool pmf_path_cap_segment(const pmfPathCacheEntry *path,
 }
 
 /**
+  \brief Emit a compensated two-point shaft without custom-cap overlap.
+
+  GDI+ truncates the final dash at a custom cap's Inset rather than allowing
+  the dash pattern to continue through the arrowhead. k-hop2.emf exposes that
+  difference at its lower-left arrow, so only the shaft is shortened; the
+  cap itself remains anchored at the original endpoint.
+ */
+static bool pmf_path_shaft_data_draw(const pmfPathCacheEntry *path,
+                                     const pmfPenCacheEntry *pen, FILE *out,
+                                     drawingStates *states,
+                                     double stroke_width) {
+    POINT_D start;
+    POINT_D end;
+    double dx;
+    double dy;
+    double length;
+    double start_inset = 0.0;
+    double end_inset = 0.0;
+
+    if (path == NULL || pen == NULL || path->count != 2 ||
+        (path->types[0] & U_PPT_MASK) != U_PPT_Start ||
+        (path->types[1] & U_PPT_MASK) != U_PPT_Line) {
+        return pmf_path_data_draw(path, out, states);
+    }
+    start = pmf_path_point_project(states, &path->points[0]);
+    end = pmf_path_point_project(states, &path->points[1]);
+    dx = end.x - start.x;
+    dy = end.y - start.y;
+    length = hypot(dx, dy);
+    if (length <= 0.0 || stroke_width <= 0.0) {
+        return pmf_path_data_draw(path, out, states);
+    }
+    if (pen->custom_start_cap) {
+        start_inset = (double)pen->start_cap_inset * stroke_width *
+                      pen->start_cap_width_scale;
+    }
+    if (pen->custom_end_cap) {
+        end_inset = (double)pen->end_cap_inset * stroke_width *
+                    pen->end_cap_width_scale;
+    }
+    if (start_inset < 0.0 || end_inset < 0.0 ||
+        start_inset + end_inset >= length) {
+        return pmf_path_data_draw(path, out, states);
+    }
+    dx /= length;
+    dy /= length;
+    start.x += dx * start_inset;
+    start.y += dy * start_inset;
+    end.x -= dx * end_inset;
+    end.y -= dy * end_inset;
+    fprintf(out, "M %.4f,%.4f L %.4f,%.4f ", start.x, start.y, end.x,
+            end.y);
+    return true;
+}
+
+/**
   \brief Emit one default EMF+ custom cap as a filled triangular arrowhead.
 
   Default custom caps in k-hop2.emf carry a triangle fill path. The cap inset
@@ -3669,7 +3725,9 @@ int U_PMR_DRAWPATH_draw(const char *contents, FILE *out,
         stabilize_stroke = true;
     }
     fprintf(out, "<%spath d=\"", states->nameSpaceString);
-    if (!pmf_path_data_draw(path, out, states)) {
+    if (compensate
+            ? !pmf_path_shaft_data_draw(path, pen, out, states, stroke_width)
+            : !pmf_path_data_draw(path, out, states)) {
         fprintf(out, "\" />\n");
         return 0;
     }
