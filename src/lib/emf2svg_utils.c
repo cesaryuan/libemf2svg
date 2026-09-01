@@ -2278,7 +2278,12 @@ void text_draw(const char *contents, FILE *out, drawingStates *states,
     size_t string_size;
     bool emitted_empty_glyph_index_text = false;
     if (positions != NULL) {
-        if (text_charset_is_multibyte(states)) {
+        /*
+         * EMR_EXTTEXTOUTW is already UTF-16. A GB2312 font charset must not
+         * send it through the ExtTextOutA CP936 decoder, or its UTF-16 bytes
+         * are emitted as unrelated ASCII characters.
+         */
+        if (type == ASCII && text_charset_is_multibyte(states)) {
             text_positioned_multibyte_chars_draw(
                 (char *)(contents + pemt->offString), out, states,
                 pemt->nChars, positions);
