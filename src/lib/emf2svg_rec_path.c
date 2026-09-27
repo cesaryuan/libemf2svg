@@ -8,7 +8,6 @@ extern "C" {
 #include "emf2svg_private.h"
 #include "emf2svg_print.h"
 #include <stdio.h>
-#include <math.h>
 #include <stdlib.h>
 
 void U_EMRBEGINPATH_draw(const char *contents, FILE *out,
@@ -46,8 +45,6 @@ void U_EMRENDPATH_draw(const char *contents, FILE *out, drawingStates *states) {
         U_EMRENDPATH_print(contents, states);
     }
     fprintf(out, "\" ");
-    /* test-image-2.emf uses an alternate compound path; preserve its lens hole. */
-    if (states->currentPath != NULL && states->currentPath->section.points != NULL && states->currentPath->section.type == SEG_MOVE && fabs(states->currentPath->section.points[0].x - 277.0) < 0.01 && fabs(states->currentPath->section.points[0].y - 35.0) < 0.01) fprintf(out, "fill-rule=\"evenodd\" ");
     states->inPath = false;
     bool filled = false;
     bool stroked = false;
@@ -59,6 +56,10 @@ void U_EMRENDPATH_draw(const char *contents, FILE *out, drawingStates *states) {
     uint32_t fillOffset = stack->pathStruct.fillOffset;
     uint32_t strokeOffset = stack->pathStruct.strokeOffset;
     uint32_t strokeFillOffset = stack->pathStruct.strokeFillOffset;
+    /* SVG defaults to nonzero; EMF alternate mode uses even-odd crossing rules. */
+    if ((fillOffset != 0 || strokeFillOffset != 0) &&
+        states->currentDeviceContext.fill_polymode == U_ALTERNATE)
+        fprintf(out, "fill-rule=\"evenodd\" ");
     if (fillOffset != 0)
         fill_draw(states, out, &filled, &stroked);
     if (strokeOffset != 0)

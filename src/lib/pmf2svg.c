@@ -156,10 +156,10 @@ static void pmf_image_clip_pending_flush(FILE *out) {
 }
 
 /**
-  \brief Remember a top-level EMF+ FillPath color for its GDI fallback.
+  \brief Remember a top-level EMF+ fill color for its GDI fallback.
 
   Dual EMF+/GDI files such as test-188.emf keep alpha only in the EMF+ ARGB
-  FillPath. The later GDI PATINVERT mask fallback carries RGB only, so this
+  fill record. The later GDI PATINVERT fallback carries RGB only, so this
   short-lived color lets the fallback preserve opacity.
   */
 static void pmf_recent_fill_color_store(drawingStates *states,
@@ -4162,6 +4162,12 @@ int U_PMR_FILLRECTS_draw(const char *contents, const char *blimit, FILE *out,
         return 0;
     }
     UNUSED(ctype);
+    if (pmf_metafile_depth <= 0 && elements != 0 &&
+        pmf_solid_brush_color(brush_id, brush_is_inline, &color) &&
+        color.Alpha != 0) {
+        /* Dual EMF+ fills retain rectangle opacity in their GDI fallback. */
+        pmf_recent_fill_color_store(states, color);
+    }
     if (!pmf_primitive_draw_allowed()) {
         free(rects);
         return 1;

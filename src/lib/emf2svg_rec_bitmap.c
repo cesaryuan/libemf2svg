@@ -539,14 +539,14 @@ void U_EMRBITBLT_draw(const char *contents, FILE *out, drawingStates *states) {
     }
     PU_EMRBITBLT pEmr = (PU_EMRBITBLT)(contents);
 
-    bool paired_shadow_blit =
+    bool paired_pattern_blit =
         states->patinvertBrush.active && pEmr->cbBitsSrc == 0 &&
         pEmr->dwRop != U_PATINVERT &&
         bitmap_bounds_match_patinvert(pEmr->rclBounds,
                                       states->patinvertBrush.bounds);
 
     if (!(pEmr->cbBitsSrc == 0 && pEmr->dwRop == U_PATINVERT) &&
-        !paired_shadow_blit) {
+        !paired_pattern_blit) {
         bitmap_patinvert_brush_flush(out, states);
     }
 
@@ -568,18 +568,16 @@ void U_EMRBITBLT_draw(const char *contents, FILE *out, drawingStates *states) {
             return;
         }
         if (states->currentDeviceContext.fill_mode == U_BS_MONOPATTERN) {
-            // Tiny bitmap pattern tiles disappear in SVG when the EMF world
-            // transform scales them below a device pixel (test-shadow.emf).
-            // Keep the visible shadow as its neutral gray average in that
-            // specific fallback case instead of dropping the rectangle.
             sprintf(style, "fill:url(#img-%d-ref);",
                     states->currentDeviceContext.fill_idx);
-            /* A 1-bit stipple below one device pixel is averaged by Visio;
-             * keep that result visible instead of letting SVG collapse the
-             * tile to a solid black sample. */
-            U_XFORM transform = states->currentDeviceContext.worldTransform;
-            if (fabs(transform.eM11) < 1.0 && fabs(transform.eM22) < 1.0) {
-                sprintf(style, "fill:#c0c0c0");
+            /* Dual EMF+ fills preserve alpha in the bracketing PATINVERT brush;
+             * tiny GDI mask tiles lose that opacity when rasterized by SVG. */
+            if (paired_pattern_blit && states->patinvertBrush.alpha < 0xff) {
+                pendingPatinvertBrush *brush = &states->patinvertBrush;
+                sprintf(style, "fill:#%02x%02x%02x;fill-opacity:%.4f",
+                        brush->red, brush->green, brush->blue,
+                        brush->alpha / 255.0);
+                brush->consumed = true;
             }
         } else if (states->currentDeviceContext.fill_mode == U_BS_SOLID) {
             sprintf(style, "fill:#%02x%02x%02x",
@@ -1152,11 +1150,8 @@ emfImageLibrary *image_library_writer(const char *contents, FILE *out,
                              "width=\"%d\" height=\"%d\" "
                              "patternUnits=\"userSpaceOnUse\" >\n",
                         states->nameSpaceString, image->id, width, height);
-                fprintf(out,
-                        "<%suse id=\"img-%d-ign\" x=\"0\" y=\"0\" "
-                        "width=\"%d\" height=\"%d\" xlink:href=\"#img-%d\" />",
-                        states->nameSpaceString, image->id, width, height,
-                        image->id);
+                fprintf(out, "<%suse id=\"img-%d-ign\" xlink:href=\"#img-%d\" />",
+                        states->nameSpaceString, image->id, image->id);
                 fprintf(out, "</%spattern></%sdefs>\n", states->nameSpaceString,
                         states->nameSpaceString);
             };

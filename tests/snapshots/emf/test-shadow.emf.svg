@@ -3,8 +3,8 @@
 <g transform="translate(-2.0000, -2.0000)">
 <g transform="matrix(0.0625 0.0000 0.0000 0.0625 0.0000 0.0000)">
 <defs><image id="img-1" x="0" y="0" width="8" height="8" xlink:href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAJUlEQVQYlWNkYGD4z4AHMDEwMDD8/4+qBpnPSJIJ2GjSTKCNGwAniyfldSdmPgAAAABJRU5ErkJgggAA"  preserveAspectRatio="none" /><pattern id="img-1-ref" x="0" y="0" width="8" height="8" patternUnits="userSpaceOnUse" >
-<use id="img-1-ign" x="0" y="0" width="8" height="8" xlink:href="#img-1" /></pattern></defs>
-<path style="fill:#c0c0c0" d="M 352.0000,352.0000 L 1396.0000,352.0000 L 1396.0000,1396.0000 L 352.0000,1396.0000 Z" /></g>
+<use id="img-1-ign" xlink:href="#img-1" /></pattern></defs>
+<path style="fill:#000000;fill-opacity:0.1804" d="M 352.0000,352.0000 L 1396.0000,352.0000 L 1396.0000,1396.0000 L 352.0000,1396.0000 Z" /></g>
 <g transform="matrix(1.0000 0.0000 0.0000 1.0000 0.0000 0.0000)">
 </g>
 <g transform="matrix(0.0625 0.0000 0.0000 0.0625 0.0000 0.0000)">
