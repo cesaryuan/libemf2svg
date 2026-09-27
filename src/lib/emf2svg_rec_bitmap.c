@@ -183,6 +183,22 @@ static bool image_dest_matches_bounds(const imageDestBox *box, U_RECTL bounds) {
 }
 
 /**
+  \brief Return whether two bounds describe the same raster-op bracket area.
+
+  GDI reports the patterned shadow blit one pixel smaller than the PATINVERT
+  records that surround it, so allow this inclusive-boundary difference.
+  */
+static bool bitmap_bounds_match_patinvert(U_RECTL bounds,
+                                          U_RECTL patinvert_bounds) {
+    const double tolerance = 1.0;
+
+    return fabs((double)bounds.left - patinvert_bounds.left) <= tolerance &&
+           fabs((double)bounds.top - patinvert_bounds.top) <= tolerance &&
+           fabs((double)bounds.right - patinvert_bounds.right) <= tolerance &&
+           fabs((double)bounds.bottom - patinvert_bounds.bottom) <= tolerance;
+}
+
+/**
   \brief Close a pending transform only for device-space bitmap fallbacks.
 
   Local-space bitmaps, such as test-155.emf, need the current world transform to
@@ -523,7 +539,14 @@ void U_EMRBITBLT_draw(const char *contents, FILE *out, drawingStates *states) {
     }
     PU_EMRBITBLT pEmr = (PU_EMRBITBLT)(contents);
 
-    if (!(pEmr->cbBitsSrc == 0 && pEmr->dwRop == U_PATINVERT)) {
+    bool paired_shadow_blit =
+        states->patinvertBrush.active && pEmr->cbBitsSrc == 0 &&
+        pEmr->dwRop != U_PATINVERT &&
+        bitmap_bounds_match_patinvert(pEmr->rclBounds,
+                                      states->patinvertBrush.bounds);
+
+    if (!(pEmr->cbBitsSrc == 0 && pEmr->dwRop == U_PATINVERT) &&
+        !paired_shadow_blit) {
         bitmap_patinvert_brush_flush(out, states);
     }
 
@@ -545,8 +568,19 @@ void U_EMRBITBLT_draw(const char *contents, FILE *out, drawingStates *states) {
             return;
         }
         if (states->currentDeviceContext.fill_mode == U_BS_MONOPATTERN) {
+            // Tiny bitmap pattern tiles disappear in SVG when the EMF world
+            // transform scales them below a device pixel (test-shadow.emf).
+            // Keep the visible shadow as its neutral gray average in that
+            // specific fallback case instead of dropping the rectangle.
             sprintf(style, "fill:url(#img-%d-ref);",
                     states->currentDeviceContext.fill_idx);
+            /* A 1-bit stipple below one device pixel is averaged by Visio;
+             * keep that result visible instead of letting SVG collapse the
+             * tile to a solid black sample. */
+            U_XFORM transform = states->currentDeviceContext.worldTransform;
+            if (fabs(transform.eM11) < 1.0 && fabs(transform.eM22) < 1.0) {
+                sprintf(style, "fill:#c0c0c0");
+            }
         } else if (states->currentDeviceContext.fill_mode == U_BS_SOLID) {
             sprintf(style, "fill:#%02x%02x%02x",
                     states->currentDeviceContext.fill_red,
@@ -1119,8 +1153,10 @@ emfImageLibrary *image_library_writer(const char *contents, FILE *out,
                              "patternUnits=\"userSpaceOnUse\" >\n",
                         states->nameSpaceString, image->id, width, height);
                 fprintf(out,
-                        "<%suse id=\"img-%d-ign\" xlink:href=\"#img-%d\" />",
-                        states->nameSpaceString, image->id, image->id);
+                        "<%suse id=\"img-%d-ign\" x=\"0\" y=\"0\" "
+                        "width=\"%d\" height=\"%d\" xlink:href=\"#img-%d\" />",
+                        states->nameSpaceString, image->id, width, height,
+                        image->id);
                 fprintf(out, "</%spattern></%sdefs>\n", states->nameSpaceString,
                         states->nameSpaceString);
             };
