@@ -107,7 +107,53 @@ static drawingStates *pmf_parent_bitmap_box_states = NULL;
 static bool pmf_top_level_primitive_draw_enabled = false;
 static uint64_t pmf_clip_mask_serial = 0;
 static uint64_t pmf_active_clip_mask_id = 0;
+static uint64_t pmf_image_clip_mask_id = 0;
+static FILE *pmf_image_clip_pending = NULL;
 static uint64_t pmf_gradient_serial = 0;
+
+/**
+  \brief Discard deferred image clip definitions that no image used.
+  */
+static void pmf_image_clip_pending_discard(void) {
+    if (pmf_image_clip_pending != NULL) {
+        fclose(pmf_image_clip_pending);
+        pmf_image_clip_pending = NULL;
+    }
+}
+
+/**
+  \brief Choose an output stream for the current top-level clip mode.
+
+  Dual EMF files can carry clips only for their EMF+ images. Buffer those mask
+  definitions until an image uses them so vector-only files remain unchanged.
+  */
+static FILE *pmf_clip_state_output(FILE *out) {
+    if (pmf_top_level_primitive_draw_enabled) {
+        return out;
+    }
+    if (pmf_image_clip_pending == NULL) {
+        pmf_image_clip_pending = tmpfile();
+    }
+    return pmf_image_clip_pending != NULL ? pmf_image_clip_pending : out;
+}
+
+/**
+  \brief Emit deferred image clip definitions before their first use.
+  */
+static void pmf_image_clip_pending_flush(FILE *out) {
+    char buffer[4096];
+    size_t count;
+
+    if (pmf_image_clip_pending == NULL) {
+        return;
+    }
+    rewind(pmf_image_clip_pending);
+    while ((count = fread(buffer, 1, sizeof(buffer),
+                          pmf_image_clip_pending)) > 0) {
+        fwrite(buffer, 1, count, out);
+    }
+    pmf_image_clip_pending_discard();
+}
 
 /**
   \brief Remember a top-level EMF+ FillPath color for its GDI fallback.
@@ -253,6 +299,8 @@ static void pmf_object_caches_clear(void) {
     pmf_region_cache_clear();
     pmf_top_level_primitive_draw_enabled = false;
     pmf_active_clip_mask_id = 0;
+    pmf_image_clip_mask_id = 0;
+    pmf_image_clip_pending_discard();
 }
 
 /**
@@ -1253,8 +1301,9 @@ static void pmf_clip_shape_draw(FILE *out, const pmfClipShape *shape,
   */
 static void pmf_clip_mask_combine_draw(FILE *out, drawingStates *states,
                                        int combine_mode,
-                                       const pmfClipShape *shape) {
-    uint64_t previous_id = pmf_active_clip_mask_id;
+                                       const pmfClipShape *shape,
+                                       uint64_t *active_mask_id) {
+    uint64_t previous_id = *active_mask_id;
     uint64_t new_id;
 
     if (shape == NULL) {
@@ -1322,7 +1371,15 @@ static void pmf_clip_mask_combine_draw(FILE *out, drawingStates *states,
         }
     }
     fprintf(out, "</mask></defs>\n");
-    pmf_active_clip_mask_id = new_id;
+    *active_mask_id = new_id;
+}
+
+/**
+  \brief Return the clip mask that applies to the next raster or metafile image.
+  */
+static uint64_t pmf_image_clip_mask_current(void) {
+    return pmf_top_level_primitive_draw_enabled ? pmf_active_clip_mask_id
+                                                : pmf_image_clip_mask_id;
 }
 
 /**
@@ -1797,6 +1854,8 @@ static int pmf_bitmap_image_draw(const pmfImageCacheEntry *image,
     size_t data_size;
     size_t b64_size;
     char *b64;
+    uint64_t clip_mask_id = pmf_image_clip_mask_current();
+    bool clipped = clip_mask_id != 0;
 
     if (!U_PMF_BITMAP_get(data, &bitmap, &bitmap_data, blimit)) {
         return 0;
@@ -1816,17 +1875,29 @@ static int pmf_bitmap_image_draw(const pmfImageCacheEntry *image,
         return 0;
     }
 
+    /*
+     * Put the clip mask on a parent group. Attaching it to the image itself
+     * makes SVG apply the image transform to the page-space clip as well,
+     * which exposes the untrimmed lower part of test-image.emf.
+     */
+    if (clipped) {
+        if (!pmf_top_level_primitive_draw_enabled) {
+            pmf_image_clip_pending_flush(out);
+        }
+        fprintf(out, "<%sg mask=\"url(#pmfClip%llu)\">\n",
+                states->nameSpaceString,
+                (unsigned long long)clip_mask_id);
+    }
     fprintf(out, "<%simage x=\"%.4f\" y=\"%.4f\" width=\"%.4f\" "
                  "height=\"%.4f\" ",
             states->nameSpaceString, src->X, src->Y, src->Width, src->Height);
     pmf_image_transform_draw(out, src, points, states);
-    pmf_clip_attr_draw(out);
-    if (pmf_active_clip_mask_id != 0) {
-        fprintf(out, " ");
-    }
     fprintf(out, "xlink:href=\"data:%s;base64,%s\" />\n",
             pmf_image_mime_type((const unsigned char *)bitmap_data, data_size),
             b64);
+    if (clipped) {
+        fprintf(out, "</%sg>\n", states->nameSpaceString);
+    }
     pmf_image_box_record(src, points, states);
     free(b64);
     return 1;
@@ -1850,6 +1921,8 @@ static int pmf_metafile_image_draw(const char *data, const char *blimit,
     bool saved_top_level_primitive_draw_enabled =
         pmf_top_level_primitive_draw_enabled;
     uint64_t saved_active_clip_mask_id = pmf_active_clip_mask_id;
+    uint64_t saved_image_clip_mask_id = pmf_image_clip_mask_id;
+    uint64_t clip_mask_id = pmf_image_clip_mask_current();
     double saved_metafile_stroke_scale = pmf_metafile_stroke_scale;
     drawingStates *saved_parent_bitmap_box_states =
         pmf_parent_bitmap_box_states;
@@ -1910,6 +1983,10 @@ static int pmf_metafile_image_draw(const char *data, const char *blimit,
     options.emfplus = true;
     options.svgDelimiter = false;
 
+    if (clip_mask_id != 0 && !saved_top_level_primitive_draw_enabled) {
+        pmf_image_clip_pending_flush(out);
+    }
+
     pmf_parent_bitmap_box_states = states;
     pmf_metafile_stroke_scale =
         saved_metafile_stroke_scale *
@@ -1923,6 +2000,7 @@ static int pmf_metafile_image_draw(const char *data, const char *blimit,
     pmf_top_level_primitive_draw_enabled =
         saved_top_level_primitive_draw_enabled;
     pmf_active_clip_mask_id = saved_active_clip_mask_id;
+    pmf_image_clip_mask_id = saved_image_clip_mask_id;
 
     if (convert_ok != 0 && svg != NULL) {
         const char *extra_close = "</g>\n";
@@ -1935,11 +2013,19 @@ static int pmf_metafile_image_draw(const char *data, const char *blimit,
             svg[svg_len] = '\0';
         }
 
+        /* Keep page-space clipping outside the transformed image group. */
+        if (clip_mask_id != 0) {
+            fprintf(out, "<%sg mask=\"url(#pmfClip%llu)\">\n",
+                    states->nameSpaceString,
+                    (unsigned long long)clip_mask_id);
+        }
         fprintf(out, "<%sg", states->nameSpaceString);
         pmf_image_transform_draw(out, src, points, states);
-        pmf_clip_attr_draw(out);
         fprintf(out, ">\n%.*s</%sg>\n", (int)svg_len, svg,
                 states->nameSpaceString);
+        if (clip_mask_id != 0) {
+            fprintf(out, "</%sg>\n", states->nameSpaceString);
+        }
         ok = 1;
     }
 
@@ -3202,24 +3288,30 @@ int U_PMR_OFFSETCLIP_draw(const char *contents, FILE *out,
     POINT_D projected_offset;
     uint64_t previous_id;
     uint64_t new_id;
+    uint64_t *active_mask_id;
+    FILE *clip_out;
 
-    if (pmf_metafile_depth != 0 || !pmf_top_level_primitive_draw_enabled) {
+    if (pmf_metafile_depth != 0) {
         return 1;
     }
     if (!U_PMR_OFFSETCLIP_get(contents, NULL, &dx, &dy)) {
         return 0;
     }
-    if (pmf_active_clip_mask_id == 0) {
+    active_mask_id = pmf_top_level_primitive_draw_enabled
+                         ? &pmf_active_clip_mask_id
+                         : &pmf_image_clip_mask_id;
+    if (*active_mask_id == 0) {
         return 1;
     }
     offset.X = dx;
     offset.Y = dy;
     projected_origin = pmf_path_point_project(states, &origin);
     projected_offset = pmf_path_point_project(states, &offset);
-    previous_id = pmf_active_clip_mask_id;
+    previous_id = *active_mask_id;
     new_id = ++pmf_clip_mask_serial;
+    clip_out = pmf_clip_state_output(out);
 
-    fprintf(out,
+    fprintf(clip_out,
             "<defs><mask id=\"pmfClip%llu\" maskUnits=\"userSpaceOnUse\" "
             "maskContentUnits=\"userSpaceOnUse\" x=\"-1000000\" "
             "y=\"-1000000\" width=\"2000000\" height=\"2000000\">\n"
@@ -3227,9 +3319,9 @@ int U_PMR_OFFSETCLIP_draw(const char *contents, FILE *out,
             (unsigned long long)new_id,
             projected_offset.x - projected_origin.x,
             projected_offset.y - projected_origin.y);
-    pmf_clip_mask_page_draw(out, "white", previous_id);
-    fprintf(out, "</g>\n</mask></defs>\n");
-    pmf_active_clip_mask_id = new_id;
+    pmf_clip_mask_page_draw(clip_out, "white", previous_id);
+    fprintf(clip_out, "</g>\n</mask></defs>\n");
+    *active_mask_id = new_id;
     return 1;
 }
 
@@ -3245,13 +3337,15 @@ int U_PMR_RESETCLIP_draw(const char *contents, FILE *out,
 
     UNUSED(out);
     UNUSED(states);
-    if (pmf_metafile_depth != 0 || !pmf_top_level_primitive_draw_enabled) {
+    if (pmf_metafile_depth != 0) {
         return 1;
     }
     if (!U_PMR_RESETCLIP_get(contents, &header)) {
         return 0;
     }
+    pmf_image_clip_pending_discard();
     pmf_active_clip_mask_id = 0;
+    pmf_image_clip_mask_id = 0;
     return 1;
 }
 
@@ -3267,7 +3361,7 @@ int U_PMR_SETCLIPPATH_draw(const char *contents, FILE *out,
     int combine_mode;
     pmfClipShape shape;
 
-    if (pmf_metafile_depth != 0 || !pmf_top_level_primitive_draw_enabled) {
+    if (pmf_metafile_depth != 0) {
         return 1;
     }
     if (!U_PMR_SETCLIPPATH_get(contents, NULL, &path_id, &combine_mode)) {
@@ -3279,7 +3373,10 @@ int U_PMR_SETCLIPPATH_draw(const char *contents, FILE *out,
     if (shape.path == NULL) {
         return 1;
     }
-    pmf_clip_mask_combine_draw(out, states, combine_mode, &shape);
+    pmf_clip_mask_combine_draw(
+        pmf_clip_state_output(out), states, combine_mode, &shape,
+        pmf_top_level_primitive_draw_enabled ? &pmf_active_clip_mask_id
+                                             : &pmf_image_clip_mask_id);
     return 1;
 }
 
@@ -3303,7 +3400,8 @@ int U_PMR_SETCLIPRECT_draw(const char *contents, FILE *out,
     shape.type = PMF_CLIP_SHAPE_RECT;
     shape.path = NULL;
     shape.region = NULL;
-    pmf_clip_mask_combine_draw(out, states, combine_mode, &shape);
+    pmf_clip_mask_combine_draw(out, states, combine_mode, &shape,
+                               &pmf_active_clip_mask_id);
     return 1;
 }
 
@@ -3331,7 +3429,8 @@ int U_PMR_SETCLIPREGION_draw(const char *contents, FILE *out,
     if (shape.region == NULL) {
         return 1;
     }
-    pmf_clip_mask_combine_draw(out, states, combine_mode, &shape);
+    pmf_clip_mask_combine_draw(out, states, combine_mode, &shape,
+                               &pmf_active_clip_mask_id);
     return 1;
 }
 

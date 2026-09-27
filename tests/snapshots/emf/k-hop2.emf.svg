@@ -819,6 +819,9 @@
 <path d="M 19856.0000,4672.0000 M 19856.0000,4672.0000 C 19856.0000,4558.0000 19950.0000,4464.0000 20064.0000,4464.0000 C 20179.0000,4464.0000 20272.0000,4558.0000 20272.0000,4672.0000 C 20272.0000,4787.0000 20179.0000,4880.0000 20064.0000,4880.0000 C 19950.0000,4880.0000 19856.0000,4787.0000 19856.0000,4672.0000 " stroke="#F2AA84" stroke-width="110.0000"  stroke-linecap="butt"  stroke-linejoin="miter"  stroke-miterlimit="8.0000"  fill="none" />
 </g>
 <g transform="matrix(1.0000 0.0000 0.0000 1.0000 0.0000 0.0000)">
+<defs><mask id="pmfClip1" maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse" x="-1000000" y="-1000000" width="2000000" height="2000000">
+<path d="M 919.0002,56.9999 L 977.9999,56.9999 L 977.9999,140.0001 L 919.0002,140.0001 Z " fill="white" stroke="none" />
+</mask></defs>
 <defs><clipPath id="clip-2044897763"><path d="M 919.0000,57.0000 L 978.0000,57.0000 L 978.0000,140.0000 L 919.0000,140.0000 L 919.0000,57.0000 Z Z" /></clipPath></defs>
 </g>
 <g clip-path="url(#clip-2044897763)" >
@@ -834,6 +837,11 @@
 </g>
 </g>
 <g transform="matrix(1.0000 0.0000 0.0000 1.0000 0.0000 0.0000)">
+<defs><mask id="pmfClip2" maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse" x="-1000000" y="-1000000" width="2000000" height="2000000">
+<g mask="url(#pmfClip1)">
+<path d="M 972.0001,218.0002 L 1050.0001,218.0002 L 1050.0001,305.0001 L 972.0001,305.0001 Z " fill="white" stroke="none" />
+</g>
+</mask></defs>
 <defs><clipPath id="clip-1967513926"><path d="M 972.0000,218.0000 L 1050.0000,218.0000 L 1050.0000,305.0000 L 972.0000,305.0000 L 972.0000,218.0000 Z Z" /></clipPath></defs>
 </g>
 <g clip-path="url(#clip-1967513926)" >
@@ -849,6 +857,11 @@
 </g>
 </g>
 <g transform="matrix(1.0000 0.0000 0.0000 1.0000 0.0000 0.0000)">
+<defs><mask id="pmfClip3" maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse" x="-1000000" y="-1000000" width="2000000" height="2000000">
+<g mask="url(#pmfClip2)">
+<path d="M 135.0001,653.0000 L 281.9998,653.0000 L 281.9998,726.9999 L 135.0001,726.9999 Z " fill="white" stroke="none" />
+</g>
+</mask></defs>
 <defs><clipPath id="clip-1365180540"><path d="M 135.0000,653.0000 L 282.0000,653.0000 L 282.0000,727.0000 L 135.0000,727.0000 L 135.0000,653.0000 Z Z" /></clipPath></defs>
 </g>
 <g clip-path="url(#clip-1365180540)" >
@@ -884,6 +897,11 @@
 <path d="M 16112.0000,11088.0000 M 16112.0000,11088.0000 C 16112.0000,10974.0000 16206.0000,10880.0000 16320.0000,10880.0000 C 16435.0000,10880.0000 16528.0000,10974.0000 16528.0000,11088.0000 C 16528.0000,11203.0000 16435.0000,11296.0000 16320.0000,11296.0000 C 16206.0000,11296.0000 16112.0000,11203.0000 16112.0000,11088.0000 " stroke="#C04F15" stroke-width="110.0000"  stroke-linecap="butt"  stroke-linejoin="miter"  stroke-miterlimit="8.0000"  fill="none" />
 </g>
 <g transform="matrix(1.0000 0.0000 0.0000 1.0000 0.0000 0.0000)">
+<defs><mask id="pmfClip4" maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse" x="-1000000" y="-1000000" width="2000000" height="2000000">
+<g mask="url(#pmfClip3)">
+<path d="M 1073.0001,667.0001 L 1733.0001,667.0001 L 1733.0001,741.0000 L 1073.0001,741.0000 Z " fill="white" stroke="none" />
+</g>
+</mask></defs>
 <defs><clipPath id="clip-1540383426"><path d="M 1073.0000,667.0000 L 1733.0000,667.0000 L 1733.0000,741.0000 L 1073.0000,741.0000 L 1073.0000,667.0000 Z Z" /></clipPath></defs>
 </g>
 <g clip-path="url(#clip-1540383426)" >
@@ -917,6 +935,11 @@
 <path  clip-path="url(#clip-304089172)" d="M 16992.0000,13136.0000 M 16992.0000,13136.0000 C 16992.0000,13022.0000 17086.0000,12928.0000 17200.0000,12928.0000 C 17315.0000,12928.0000 17408.0000,13022.0000 17408.0000,13136.0000 C 17408.0000,13251.0000 17315.0000,13344.0000 17200.0000,13344.0000 C 17086.0000,13344.0000 16992.0000,13251.0000 16992.0000,13136.0000 " stroke="#F2AA84" stroke-width="110.0000"  stroke-linecap="butt"  stroke-linejoin="miter"  stroke-miterlimit="8.0000"  fill="none" />
 </g>
 <g transform="matrix(1.0000 0.0000 0.0000 1.0000 0.0000 0.0000)">
+<defs><mask id="pmfClip5" maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse" x="-1000000" y="-1000000" width="2000000" height="2000000">
+<g mask="url(#pmfClip4)">
+<path d="M 1116.0001,794.9999 L 1786.0001,794.9999 L 1786.0001,868.9998 L 1116.0001,868.9998 Z " fill="white" stroke="none" />
+</g>
+</mask></defs>
 <defs><clipPath id="clip-1303455736"><path d="M 1116.0000,795.0000 L 1786.0000,795.0000 L 1786.0000,869.0000 L 1116.0000,869.0000 L 1116.0000,795.0000 Z Z" /></clipPath></defs>
 </g>
 <g clip-path="url(#clip-1303455736)" >
@@ -947,6 +970,11 @@
 <path  clip-path="url(#clip-35005211)" d="M 0.0000,13241.0000 L 330.0000,13241.0000 L 330.0000,13351.0000 L 0.0000,13351.0000 L 0.0000,13241.0000 Z M 440.0000,13241.0000 L 770.0000,13241.0000 L 770.0000,13351.0000 L 440.0000,13351.0000 L 440.0000,13241.0000 Z M 880.0000,13241.0000 L 1210.0000,13241.0000 L 1210.0000,13351.0000 L 880.0000,13351.0000 L 880.0000,13241.0000 Z M 1320.0000,13241.0000 L 1650.0000,13241.0000 L 1650.0000,13351.0000 L 1320.0000,13351.0000 L 1320.0000,13241.0000 Z M 1760.0000,13241.0000 L 1933.0000,13241.0000 L 1933.0000,13351.0000 L 1760.0000,13351.0000 L 1760.0000,13241.0000 Z M 1860.0000,13076.0000 L 2300.0000,13296.0000 L 1860.0000,13516.0000 L 1860.0000,13076.0000 Z "  fill="#C04F15" stroke="#C04F15" stroke-width="1.0000"  stroke-linecap="butt"  stroke-linejoin="round" />
 </g>
 <g transform="matrix(1.0000 0.0000 0.0000 1.0000 0.0000 0.0000)">
+<defs><mask id="pmfClip6" maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse" x="-1000000" y="-1000000" width="2000000" height="2000000">
+<g mask="url(#pmfClip5)">
+<path d="M 44.0000,757.0002 L 122.0000,757.0002 L 122.0000,844.0001 L 44.0000,844.0001 Z " fill="white" stroke="none" />
+</g>
+</mask></defs>
 <defs><clipPath id="clip-521595368"><path d="M 44.0000,757.0000 L 122.0000,757.0000 L 122.0000,844.0000 L 44.0000,844.0000 L 44.0000,757.0000 Z Z" /></clipPath></defs>
 </g>
 <g clip-path="url(#clip-521595368)" >
@@ -962,6 +990,11 @@
 </g>
 </g>
 <g transform="matrix(1.0000 0.0000 0.0000 1.0000 0.0000 0.0000)">
+<defs><mask id="pmfClip7" maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse" x="-1000000" y="-1000000" width="2000000" height="2000000">
+<g mask="url(#pmfClip6)">
+<path d="M 168.0001,791.9999 L 938.0001,791.9999 L 938.0001,865.0001 L 168.0001,865.0001 Z " fill="white" stroke="none" />
+</g>
+</mask></defs>
 <defs><clipPath id="clip-294702567"><path d="M 168.0000,792.0000 L 938.0000,792.0000 L 938.0000,865.0000 L 168.0000,865.0000 L 168.0000,792.0000 Z Z" /></clipPath></defs>
 </g>
 <g clip-path="url(#clip-294702567)" >
@@ -982,6 +1015,11 @@
 <path d="M 6424.0000,11144.0000 L 9042.0000,11144.0000 L 9042.0000,11273.0000 L 6424.0000,11273.0000 L 6424.0000,11144.0000 Z M 8969.0000,10988.0000 L 9409.0000,11208.0000 L 8969.0000,11428.0000 L 8969.0000,10988.0000 Z "  fill="#FF0000" stroke="#FF0000" stroke-width="1.0000"  stroke-linecap="butt"  stroke-linejoin="round" />
 </g>
 <g transform="matrix(1.0000 0.0000 0.0000 1.0000 0.0000 0.0000)">
+<defs><mask id="pmfClip8" maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse" x="-1000000" y="-1000000" width="2000000" height="2000000">
+<g mask="url(#pmfClip7)">
+<path d="M 471.9999,616.9999 L 532.0001,616.9999 L 532.0001,700.0001 L 471.9999,700.0001 Z " fill="white" stroke="none" />
+</g>
+</mask></defs>
 <defs><clipPath id="clip-1726956429"><path d="M 472.0000,617.0000 L 532.0000,617.0000 L 532.0000,700.0000 L 472.0000,700.0000 L 472.0000,617.0000 Z Z" /></clipPath></defs>
 </g>
 <g clip-path="url(#clip-1726956429)" >
@@ -997,6 +1035,11 @@
 </g>
 </g>
 <g transform="matrix(1.0000 0.0000 0.0000 1.0000 0.0000 0.0000)">
+<defs><mask id="pmfClip9" maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse" x="-1000000" y="-1000000" width="2000000" height="2000000">
+<g mask="url(#pmfClip8)">
+<path d="M 620.0001,666.0001 L 904.0001,666.0001 L 904.0001,730.0000 L 620.0001,730.0000 Z " fill="white" stroke="none" />
+</g>
+</mask></defs>
 <defs><clipPath id="clip-336465782"><path d="M 620.0000,666.0000 L 904.0000,666.0000 L 904.0000,730.0000 L 620.0000,730.0000 L 620.0000,666.0000 Z Z" /></clipPath></defs>
 </g>
 <g clip-path="url(#clip-336465782)" >
