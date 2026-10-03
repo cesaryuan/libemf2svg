@@ -37,11 +37,10 @@ static bool page_dimension_close(double a, double b) {
 /**
   \brief Return whether the header bounds are visibly larger than a page clip.
 
-  uav-sample-images.emf declares horizontally oversized header bounds from a
-  GDI bitmap fallback, but the bitmap is clipped to the real EMF+ page. When
-  the first clip matches rclFrame's physical page size and only the horizontal
-  bounds are inflated, prefer that clip for the SVG canvas so clipped-away
-  bitmap margins do not become visible whitespace.
+  GDI bitmap fallbacks can inflate either axis of the header bounds, as in
+  uav-sample-images.emf and test-image.emf. Prefer the first clip when it agrees
+  with rclFrame's physical page size and the header covers that page (allowing
+  rounding). This prevents clipped bitmap margins from enlarging the canvas.
   */
 static bool header_should_use_clip_bounds(PU_EMRHEADER pEmr,
                                           U_RECTL clipBounds) {
@@ -76,9 +75,17 @@ static bool header_should_use_clip_bounds(PU_EMRHEADER pEmr,
         headerWidth > clipWidth + tolerance ||
         (double)pEmr->rclBounds.left < (double)clipBounds.left - tolerance ||
         (double)pEmr->rclBounds.right > (double)clipBounds.right + tolerance;
+    bool verticalOversized =
+        headerHeight > clipHeight + tolerance ||
+        (double)pEmr->rclBounds.top < (double)clipBounds.top - tolerance ||
+        (double)pEmr->rclBounds.bottom > (double)clipBounds.bottom + tolerance;
+    bool coversPage =
+        (double)pEmr->rclBounds.left <= (double)clipBounds.left + tolerance &&
+        (double)pEmr->rclBounds.top <= (double)clipBounds.top + tolerance &&
+        (double)pEmr->rclBounds.right >= (double)clipBounds.right - tolerance &&
+        (double)pEmr->rclBounds.bottom >= (double)clipBounds.bottom - tolerance;
 
-    return horizontalOversized &&
-           page_dimension_close(headerHeight, clipHeight);
+    return coversPage && (horizontalOversized || verticalOversized);
 }
 
 void U_EMREOF_draw(const char *contents, FILE *out, drawingStates *states) {
