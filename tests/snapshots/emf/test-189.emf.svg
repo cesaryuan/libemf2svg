@@ -220,9 +220,7 @@
 </g>
 <g transform="matrix(1.0000 0.0000 0.0000 1.0000 0.0000 0.0000)">
 <defs><mask id="pmfClip2" maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse" x="-1000000" y="-1000000" width="2000000" height="2000000">
-<g mask="url(#pmfClip1)">
 <path d="M 107.7940,119.6284 L 128.1656,119.6284 L 128.1656,78.0252 L 107.7940,78.0252 Z " fill="white" stroke="none" />
-</g>
 </mask></defs>
 <g mask="url(#pmfClip2)">
 <g transform="matrix(0.0394 0.0000 0.0000 0.0395 107.7940 78.0252)" >

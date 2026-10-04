@@ -111,6 +111,62 @@ static uint64_t pmf_image_clip_mask_id = 0;
 static FILE *pmf_image_clip_pending = NULL;
 static uint64_t pmf_gradient_serial = 0;
 
+typedef struct pmfSavedClipState {
+    uint32_t stack_id;
+    uint64_t active_mask_id;
+    uint64_t image_mask_id;
+    struct pmfSavedClipState *previous;
+} pmfSavedClipState;
+
+static pmfSavedClipState *pmf_saved_clip_states = NULL;
+
+/**
+  \brief Free saved clipping states at an EMF+ stream boundary.
+  */
+static void pmf_saved_clip_states_clear(void) {
+    while (pmf_saved_clip_states != NULL) {
+        pmfSavedClipState *saved = pmf_saved_clip_states;
+        pmf_saved_clip_states = saved->previous;
+        free(saved);
+    }
+}
+
+/**
+  \brief Return whether a saved image clip still needs deferred definitions.
+
+  ResetClip or Restore must not discard masks that a later Restore can reuse.
+  */
+static bool pmf_saved_image_clip_exists(void) {
+    for (pmfSavedClipState *saved = pmf_saved_clip_states; saved != NULL;
+         saved = saved->previous) {
+        if (saved->image_mask_id != 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/**
+  \brief Save both clipping modes under an EMF+ graphics stack index.
+
+  070-fe-results.emf scopes each bitmap clip with Save/Restore; ignoring these
+  records intersects unrelated image rectangles until the clip becomes empty.
+  */
+static int pmf_clip_state_save(uint32_t stack_id) {
+    pmfSavedClipState *saved = malloc(sizeof(*saved));
+
+    if (saved == NULL) {
+        fprintf(stderr, "emf2svg: failed to save EMF+ clip state\n");
+        return 0;
+    }
+    saved->stack_id = stack_id;
+    saved->active_mask_id = pmf_active_clip_mask_id;
+    saved->image_mask_id = pmf_image_clip_mask_id;
+    saved->previous = pmf_saved_clip_states;
+    pmf_saved_clip_states = saved;
+    return 1;
+}
+
 /**
   \brief Discard deferred image clip definitions that no image used.
   */
@@ -119,6 +175,35 @@ static void pmf_image_clip_pending_discard(void) {
         fclose(pmf_image_clip_pending);
         pmf_image_clip_pending = NULL;
     }
+}
+
+/**
+  \brief Restore a clip and pop its save plus all more recent saves.
+
+  Stack indices can be reused after Restore, so search from the newest save.
+  An unknown index leaves the current clip and stack untouched.
+  */
+static int pmf_clip_state_restore(uint32_t stack_id) {
+    pmfSavedClipState *saved = pmf_saved_clip_states;
+
+    while (saved != NULL && saved->stack_id != stack_id) {
+        saved = saved->previous;
+    }
+    if (saved == NULL) {
+        return 1;
+    }
+    pmf_active_clip_mask_id = saved->active_mask_id;
+    pmf_image_clip_mask_id = saved->image_mask_id;
+    pmfSavedClipState *previous = saved->previous;
+    while (pmf_saved_clip_states != previous) {
+        pmfSavedClipState *top = pmf_saved_clip_states;
+        pmf_saved_clip_states = top->previous;
+        free(top);
+    }
+    if (pmf_image_clip_mask_id == 0 && !pmf_saved_image_clip_exists()) {
+        pmf_image_clip_pending_discard();
+    }
+    return 1;
 }
 
 /**
@@ -301,6 +386,7 @@ static void pmf_object_caches_clear(void) {
     pmf_active_clip_mask_id = 0;
     pmf_image_clip_mask_id = 0;
     pmf_image_clip_pending_discard();
+    pmf_saved_clip_states_clear();
 }
 
 /**
@@ -1923,6 +2009,8 @@ static int pmf_metafile_image_draw(const char *data, const char *blimit,
     uint64_t saved_active_clip_mask_id = pmf_active_clip_mask_id;
     uint64_t saved_image_clip_mask_id = pmf_image_clip_mask_id;
     uint64_t clip_mask_id = pmf_image_clip_mask_current();
+    pmfSavedClipState *saved_clip_states;
+    FILE *saved_image_clip_pending;
     double saved_metafile_stroke_scale = pmf_metafile_stroke_scale;
     drawingStates *saved_parent_bitmap_box_states =
         pmf_parent_bitmap_box_states;
@@ -1987,6 +2075,11 @@ static int pmf_metafile_image_draw(const char *data, const char *blimit,
         pmf_image_clip_pending_flush(out);
     }
 
+    /* A child stream must not clear its parent's saves or deferred masks. */
+    saved_clip_states = pmf_saved_clip_states;
+    saved_image_clip_pending = pmf_image_clip_pending;
+    pmf_saved_clip_states = NULL;
+    pmf_image_clip_pending = NULL;
     pmf_parent_bitmap_box_states = states;
     pmf_metafile_stroke_scale =
         saved_metafile_stroke_scale *
@@ -1994,6 +2087,10 @@ static int pmf_metafile_image_draw(const char *data, const char *blimit,
     pmf_metafile_depth++;
     int convert_ok = emf2svg(metafile_copy, size, &svg, &svg_len, &options);
     pmf_metafile_depth--;
+    pmf_saved_clip_states_clear();
+    pmf_image_clip_pending_discard();
+    pmf_saved_clip_states = saved_clip_states;
+    pmf_image_clip_pending = saved_image_clip_pending;
     pmf_parent_bitmap_box_states = saved_parent_bitmap_box_states;
     pmf_metafile_stroke_scale = saved_metafile_stroke_scale;
     pmf_world_transform = saved_world_transform;
@@ -3343,7 +3440,9 @@ int U_PMR_RESETCLIP_draw(const char *contents, FILE *out,
     if (!U_PMR_RESETCLIP_get(contents, &header)) {
         return 0;
     }
-    pmf_image_clip_pending_discard();
+    if (!pmf_saved_image_clip_exists()) {
+        pmf_image_clip_pending_discard();
+    }
     pmf_active_clip_mask_id = 0;
     pmf_image_clip_mask_id = 0;
     return 1;
@@ -4483,25 +4582,37 @@ int U_PMR_ENDCONTAINER_draw(const char *contents, FILE *out,
 }
 
 /**
-  \brief Print data from a  U_PMR_RESTORE record
+  \brief Restore clipping saved by a U_PMR_SAVE record.
   \return size of record in bytes on success, 0 on error
   \param  contents   Record from which to print data
   EMF+ manual 2.3.7.4, Microsoft name: EmfPlusRestore Record, Index 0x26
   */
 int U_PMR_RESTORE_draw(const char *contents, FILE *out, drawingStates *states) {
-    int status = 1;
-    return (status);
+    uint32_t stack_id;
+
+    UNUSED(out);
+    UNUSED(states);
+    if (!U_PMR_RESTORE_get(contents, NULL, &stack_id)) {
+        return 0;
+    }
+    return pmf_clip_state_restore(stack_id);
 }
 
 /**
-  \brief Print data from a  U_PMR_SAVE record
+  \brief Save current clipping for a matching U_PMR_RESTORE record.
   \return size of record in bytes on success, 0 on error
   \param  contents   Record from which to print data
   EMF+ manual 2.3.7.5, Microsoft name: EmfPlusSave Record, Index 0x25
   */
 int U_PMR_SAVE_draw(const char *contents, FILE *out, drawingStates *states) {
-    int status = 1;
-    return (status);
+    uint32_t stack_id;
+
+    UNUSED(out);
+    UNUSED(states);
+    if (!U_PMR_SAVE_get(contents, NULL, &stack_id)) {
+        return 0;
+    }
+    return pmf_clip_state_save(stack_id);
 }
 
 /**
